@@ -6,6 +6,7 @@ import { create } from "ipfs-http-client";
 import bcrypt from "bcrypt"
 import connect from "./dbconnect.js"
 import jwt from "jsonwebtoken"
+console.log(process.env.MONGODB ? "MongoDB connected" : "MongoDB not connected")
 connect(process.env.MONGODB || "mongodb://localhost:27017/sih")
 const app = express();
 
@@ -106,14 +107,16 @@ app.post('/register', async (req, res) => {
   const { name, email, password } = req?.body
   const alreadyexist = await User.findOne({ $or: [{ email: email }, { name: name }] })
   console.log(req.body)
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
   if (alreadyexist) {
     return res.status(400).json({ message: "user already exists" })
   }
   if (!emailRegex.test(email)) {
+    console.log("Invalid email format")
     return res.status(400).json({ message: "Invalid email format" });
   }
   if (!name.trim() || !email.trim() || !password.trim()) {
+    console.log("All fields are required")
     return res.status(400).json({ message: "all fields are required" })
   }
   const hashedpassword = await bcrypt.hash(password, 10)
