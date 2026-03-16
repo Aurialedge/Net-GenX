@@ -1,0 +1,24 @@
+{
+    "name": "cid-blockchain",
+    "version": "1.0.0",
+    "type": "module",
+    "scripts": {
+        "node": "npx hardhat node",
+        "compile": "npx hardhat compile",
+        "deploy": "npx hardhat run scripts/deploy.js --network localhost",
+        "watch": "npx hardhat run scripts/watch_and_store_all.js --network localhost",
+        "retrieve": "npx hardhat run scripts/retrieve_all_cids.js --network localhost",
+        "interact": "npx hardhat run scripts/interact.js --network localhost"
+    },
+    "devDependencies": {
+        "@nomicfoundation/hardhat-toolbox": "^3.0.0",
+        "hardhat": "^2.17.0"
+    },
+    "dependencies": {
+        "axios": "^1.5.0",
+        "cors": "^2.8.5",
+        "express": "^5.1.0",
+        "multer": "^2.0.2",
+        "nodemon": "^3.1.10"
+    }
+}

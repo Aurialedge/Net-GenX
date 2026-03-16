@@ -1,0 +1,18 @@
+cls
+await cid.totalCIDs();  
+await cid.getLatestCID();  // prints just the latest
+await cid.getAllCIDs();    // prints the whole array
+const cid = CID.attach("0x5FbDB2315678afecb367f032d93F642f64180aa3");  // from deployedAddress.txt
+const CID = await ethers.getContractFactory("CIDStorage");
+.load test.js
+.load
+.help
+await cid.getLatestCID();  // prints jawait cid.totalCIDs();  
+await cid.getAllCIDs();    // prints the whole array
+const cid = CID.attach("0x5FbDB2315678afeess.txt
+await cid.totalCIDs();  const CID = await ethers.getContractFactory("CIDStorage");
+await cid.getLatestCID();  // prints just the latest
+await cid.getAllCIDs();    // prints the whole array
+const cid = CID.attach("YOUR_DEPLOYED_ADD
+const CID = await ethers.getContractFactory("CIDStorage");
+0x5FbDB2315678afecb367f032d93F642f64180aa3
