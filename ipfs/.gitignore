@@ -1,3 +1,7 @@
 node_modules
 .env
 *.env
+.env.*
+storage/
+*.meta
+data/cert_army_alerts.json

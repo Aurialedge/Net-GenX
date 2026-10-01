@@ -1,0 +1,22 @@
+[
+  {
+    "_id": "off_cert_01",
+    "officialId": "ARMY-CERT-01",
+    "department": "Indian Army Cyber Group (CERT-Army)",
+    "password": "DefShield@2025",
+    "phone": "+91-9876543210",
+    "phoneNumber": "+91-9876543210",
+    "securityCode": "123456",
+    "role": "Analyst"
+  },
+  {
+    "_id": "off_cert_02",
+    "officialId": "DEF-ADMIN-01",
+    "department": "Defence Cyber Agency (DCA)",
+    "password": "DCAadmin@2025",
+    "phone": "+91-9811223344",
+    "phoneNumber": "+91-9811223344",
+    "securityCode": "123456",
+    "role": "Admin"
+  }
+]

@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 
 
 import { OtpStore } from './otp.store.js'
+import { userStore } from './store.js'
 
 export default function AuthPages() {
     const [authType, setAuthType] = useState('select'); // 'select', 'user', 'official', 'user-register', 'official-register'
@@ -168,16 +169,21 @@ export default function AuthPages() {
             console.log(data, res.status)
             if (res.status === 200) {
                 localStorage.setItem("logintoken", data.token);
-                // console.log(res);
-
+                if (data.name) {
+                    userStore.getState().setUser({
+                        _id: data.id || "usr_session",
+                        name: data.name,
+                        email: data.email || formData.email
+                    });
+                }
                 setTimeout(() => {
                     setIsLoading(false);
                     setMessage(`ACCESS GRANTED - ${data.msg}`);
-                }, 2000);
+                }, 1500);
 
                 setTimeout(() => {
                     navigate('/upload');
-                }, 3000);
+                }, 2200);
             } else {
                 // This else may not run often, since axios usually throws on non-200s
                 setTimeout(() => {
@@ -220,14 +226,14 @@ export default function AuthPages() {
             if (res.status === 200) {
                 localStorage.setItem("logintoken", data.token);
                 console.log(data);
-                console.log(data.official.phone, data.official.phone.split('-')[1])
-                setnumber(data.official.phone)
+                const officialPhone = data.official?.phone || data.official?.phoneNumber || "+91-9876543210";
+                setnumber(officialPhone);
 
                 setTimeout(() => {
                     setIsLoading(false);
                     setMessage(`ACCESS GRANTED - CLICK HERE SEND THE SECURITY CODE ON YOUR MOBILE NUMBER`);
-                }, 2000);
-                setloginsuccess(true)
+                }, 1500);
+                setloginsuccess(true);
 
             } else {
                 // This else may not run often, since axios usually throws on non-200s
@@ -270,13 +276,16 @@ export default function AuthPages() {
         console.log(data)
         if (!data) {
             setMessage("Failed to send OTP");
-            setSending("Send Code to Mobile Number")
+            setSending("Send Code to Mobile Number");
             return;
         }
-        setMessage("Verify the code");
-        setSending("Verify the OTP on your GOV NO.")
-        setOtpsent(true)
-    }
+        setMessage(data.testOtp ? `OTP DISPATCHED - [Verification Code: ${data.testOtp}]` : "Verify the code on your registered mobile");
+        if (data.testOtp) {
+            setFormData(prev => ({ ...prev, securityCode: data.testOtp }));
+        }
+        setSending("Verify the OTP on your GOV NO.");
+        setOtpsent(true);
+    };
     const handleverifyotp = async () => {
         const address = "localhost"
         const port = 8000
@@ -614,9 +623,17 @@ export default function AuthPages() {
                         </button>
 
                         <div className="text-center py-4">
-                            <div className="text-5xl mb-3">👤</div>
-                            <p className="text-green-300 text-xs">ENTER YOUR CREDENTIALS</p>
+                            <div className="text-5xl mb-3">🛡️</div>
+                            <p className="text-green-300 text-xs">DEFENCE ECOSYSTEM AUTHENTICATION</p>
                         </div>
+
+                        <button
+                            type="button"
+                            onClick={() => setFormData(prev => ({ ...prev, email: "officer@army.mil", password: "Password123" }))}
+                            className="text-xs text-emerald-300 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/40 p-2.5 rounded-lg w-full font-mono text-center mb-2 shadow cursor-pointer transition"
+                        >
+                            ⚡ Quick Fill: Demo Officer (officer@army.mil / Password123)
+                        </button>
 
                         <div className="space-y-4">
                             <div>
@@ -907,8 +924,18 @@ export default function AuthPages() {
 
                         <div className="text-center py-4">
                             <div className="text-5xl mb-3">⭐</div>
-                            <p className="text-amber-300 text-xs">AUTHORIZED PERSONNEL ONLY</p>
+                            <p className="text-amber-300 text-xs">AUTHORIZED DEFENCE CLEARANCE ONLY</p>
                         </div>
+
+                        {!loginsuccess && (
+                            <button
+                                type="button"
+                                onClick={() => setFormData(prev => ({ ...prev, officialId: "ARMY-CERT-01", department: "defense", password: "DefShield@2025" }))}
+                                className="text-xs text-amber-300 bg-amber-950/80 hover:bg-amber-900 border border-amber-500/40 p-2.5 rounded-lg w-full font-mono text-center mb-2 shadow cursor-pointer transition"
+                            >
+                                ⚡ Quick Fill: CERT-Army Official (ARMY-CERT-01 / DefShield@2025)
+                            </button>
+                        )}
 
                         <div className="space-y-4">
                             <div className='flex flex-col space-y-2 gap-2'>

@@ -22,7 +22,7 @@ async function insert(cid, note = "") {
 
   try {
     const info = await contract.getCIDInfo(cid);
-    console.log("Stored CID info:", { timestamp: info[0].toNumber(), note: info[1] });
+    console.log("Stored CID info:", { timestamp: info[0].toString(), note: info[1] });
   } catch (err) {
     console.log("Could not fetch CID info:", err.message);
   }

@@ -1,0 +1,16 @@
+[
+  {
+    "_id": "usr_army_01",
+    "name": "Major Vikram Sharma (Retd.)",
+    "email": "officer@army.mil",
+    "password": "$2b$10$RUzZVy5JoNNVV697v/i0p.2/I6b.G1AlYL0vlxBXkj/pIhuNcBvau",
+    "role": "Veteran"
+  },
+  {
+    "_id": "usr_army_02",
+    "name": "Sepoy Amit Kumar",
+    "email": "defence.user@gmail.com",
+    "password": "$2b$10$hzJ/Flr5Sy6Vv0xIzcVkPOCldbkUSUN1nAbdZDhFc8ONKLZKoPxHW",
+    "role": "Personnel"
+  }
+]

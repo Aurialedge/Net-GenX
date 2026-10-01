@@ -1,0 +1,69 @@
+# Environment Variables & Secrets (CRITICAL)
+.env
+*.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+package-lock.json.backup
+
+# Python Caches & Environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IPFS Local Runtime Vault & Uploaded Media
+ipfs/storage/
+storage/
+*.meta
+
+# Dynamic Runtime Alert Logs
+ipfs/data/cert_army_alerts.json
+
+# Hardhat & Smart Contracts
+block/cache/
+block/artifacts/build-info/
+
+# Frontend Build Outputs
+frontend/dist/
+frontend/dist-ssr/
+
+# Logs & Debugging
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# System & IDE Files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
