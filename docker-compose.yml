@@ -1,0 +1,93 @@
+services:
+  # Multi-tier Service 1: Python AI Threat Inference Engine
+  ml-service:
+    build:
+      context: ./ml_service
+      dockerfile: Dockerfile
+    container_name: netgenx-ml-service
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - PYTHONUNBUFFERED=1
+    networks:
+      - netgenx-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # Multi-tier Service 2: IPFS Cryptographic Storage & Defence Security Gateway
+  ipfs-gateway:
+    build:
+      context: ./ipfs
+      dockerfile: Dockerfile
+    container_name: netgenx-ipfs-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - SECRET_KEY=netgenx_defence_cyber_shield_secret_key_2025
+      - ML_SERVICE_URL=http://ml-service:5000
+      - BLOCKCHAIN_URL=http://blockchain-ledger:9000
+    depends_on:
+      ml-service:
+        condition: service_healthy
+    volumes:
+      - ipfs-vault-data:/app/vault_storage
+    networks:
+      - netgenx-network
+    restart: unless-stopped
+
+  # Multi-tier Service 3: Ethereum Smart Contract & Immutable Blockchain Ledger
+  blockchain-ledger:
+    build:
+      context: ./block
+      dockerfile: Dockerfile
+    container_name: netgenx-blockchain-ledger
+    ports:
+      - "9000:9000"
+    environment:
+      - PORT=9000
+    volumes:
+      - blockchain-ledger-data:/app/data
+    networks:
+      - netgenx-network
+    restart: unless-stopped
+
+  # Multi-tier Service 4: React Cyber Incident Response Portal Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: netgenx-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_IPFS_ADDRESS=localhost
+      - VITE_IPFS_PORT=8000
+      - VITE_BLOCK_ADDRESS=localhost
+      - VITE_BLOCK_PORT=9000
+      - VITE_ML_ADDRESS=localhost
+      - VITE_ML_PORT=5000
+    depends_on:
+      - ipfs-gateway
+      - blockchain-ledger
+      - ml-service
+    networks:
+      - netgenx-network
+    restart: unless-stopped
+
+networks:
+  netgenx-network:
+    driver: bridge
+    name: netgenx-network
+
+volumes:
+  ipfs-vault-data:
+    driver: local
+  blockchain-ledger-data:
+    driver: local

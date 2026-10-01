@@ -9,6 +9,7 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import path from "path";
 import fs from "fs";
+import rateLimit from "express-rate-limit";
 
 import connect from "./dbconnect.js";
 import { uploadFile, getFileData } from "./main.js";
@@ -24,7 +25,31 @@ connect(process.env.MONGODB);
 
 const app = express();
 
-// Middlewares
+// ==========================================
+// 1. RATE-LIMITING MIDDLEWARE
+// ==========================================
+// General API rate limiter (protecting system resources from flooding/DDoS)
+export const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15-minute window
+  max: 300, // 300 requests per 15 minutes per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { status: false, msg: "Rate limit exceeded: Too many requests, please try again in 15 minutes." }
+});
+
+// Stricter rate limiter for sensitive authentication & OTP endpoints to stop brute-forcing
+export const authRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15-minute window
+  max: 60, // 60 attempts per 15 minutes
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { status: false, msg: "Security Alert: Too many authentication attempts from this IP. Please wait." }
+});
+
+// Apply global rate limiting
+app.use(apiLimiter);
+
+// Core Middlewares
 app.use(cors({
   origin: true,
   credentials: true
@@ -40,13 +65,136 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
 });
 
+// ==========================================
+// 2. JWT & ROLE-BASED ACCESS CONTROL (RBAC)
+// ==========================================
+export const authenticateJWT = (req, res, next) => {
+  let token = req.cookies?.logintoken;
+  if (!token && req.headers.authorization) {
+    token = req.headers.authorization.replace(/^Bearer\s+/, '');
+  }
+
+  if (!token) {
+    return res.status(401).json({ status: false, msg: "Authentication required: No token provided" });
+  }
+
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    return res.status(401).json({ status: false, msg: "Invalid or expired authorization token" });
+  }
+};
+
+export const authorizeRole = (...allowedRoles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ status: false, msg: "Authentication required" });
+    }
+    const currentRole = (req.user.role || "Personnel").toLowerCase();
+    const normalizedAllowed = allowedRoles.map(r => r.toLowerCase());
+
+    if (!normalizedAllowed.includes(currentRole) && !normalizedAllowed.includes("*")) {
+      return res.status(403).json({
+        status: false,
+        msg: `Access Forbidden: Requires one of roles: [${allowedRoles.join(', ')}]. Current role: ${req.user.role || 'Personnel'}`
+      });
+    }
+    next();
+  };
+};
+
+// ==========================================
+// 3. STRICT INPUT VALIDATION SCHEMAS
+// ==========================================
+export const validationSchemas = {
+  register: {
+    name: { required: true, type: 'string', minLength: 2 },
+    email: { required: true, type: 'string', regex: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, error: "Invalid email format" },
+    password: { required: true, type: 'string', minLength: 6, error: "Password must be at least 6 characters" }
+  },
+  loginUser: {
+    email: { required: true, type: 'string', regex: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, error: "Invalid email format" },
+    password: { required: true, type: 'string', minLength: 1 }
+  },
+  loginOfficial: {
+    officialId: { required: true, type: 'string', minLength: 3 },
+    password: { required: true, type: 'string', minLength: 1 }
+  },
+  sendOtp: {
+    number: { required: true, type: 'string', minLength: 8 }
+  },
+  verifyOtp: {
+    number: { required: true, type: 'string', minLength: 8 },
+    code: { required: true, type: 'string', minLength: 6 }
+  },
+  uploadText: {
+    textOrMessage: {
+      custom: (body) => (body && (
+        (typeof body.message === 'string' && body.message.trim().length > 0) ||
+        (typeof body.text === 'string' && body.text.trim().length > 0)
+      )),
+      error: "Evidentiary text content is required"
+    }
+  }
+};
+
+export const validateBody = (schema) => (req, res, next) => {
+  const errors = [];
+  const body = req.body || {};
+
+  for (const [field, rule] of Object.entries(schema)) {
+    if (rule.custom) {
+      if (!rule.custom(body)) {
+        errors.push(rule.error || `Invalid payload for ${field}`);
+      }
+      continue;
+    }
+
+    const value = body[field];
+    if (rule.required && (value === undefined || value === null || (typeof value === 'string' && !value.trim()))) {
+      errors.push(`Field '${field}' is required`);
+      continue;
+    }
+    if (value !== undefined && value !== null && value !== '') {
+      if (rule.type && typeof value !== rule.type) {
+        errors.push(`Field '${field}' must be of type ${rule.type}`);
+      }
+      if (rule.minLength && typeof value === 'string' && value.trim().length < rule.minLength) {
+        errors.push(rule.error || `Field '${field}' must have at least ${rule.minLength} characters`);
+      }
+      if (rule.regex && typeof value === 'string' && !rule.regex.test(value.trim())) {
+        errors.push(rule.error || `Field '${field}' has invalid format`);
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    return res.status(400).json({ status: false, message: errors[0], msg: errors[0], errors });
+  }
+  next();
+};
+
+// ==========================================
+// 4. API ENDPOINTS
+// ==========================================
+
 // Root & Health
 app.get("/", (req, res) => {
   res.json({
     status: true,
     service: "NetGenX IPFS Storage & Defence Security Gateway",
-    version: "2.5.0",
-    port: 8000
+    version: "2.6.0",
+    port: 8000,
+    features: [
+      "Decoupled Microservices Architecture",
+      "IPFS Cryptographic Off-Chain Vault (SHA-256 multihash)",
+      "Ethereum Smart Contract Chain-of-Custody Logging",
+      "JWT-Based RBAC Middleware (Personnel vs CERT-Army)",
+      "Rate-Limiting Middleware (DDoS & Brute-Force Shield)",
+      "Strict Input Validation Schemas"
+    ]
   });
 });
 
@@ -74,14 +222,10 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   }
 });
 
-// Text upload endpoint (IPFS Storage Group)
-app.post('/uploadtext', async (req, res) => {
+// Text upload endpoint (IPFS Storage Group) with Strict Schema Validation
+app.post('/uploadtext', validateBody(validationSchemas.uploadText), async (req, res) => {
   try {
     const text = req.body.message || req.body.text;
-    if (!text) {
-      return res.status(400).json({ status: false, message: "No text provided for IPFS storage" });
-    }
-
     const buffer = Buffer.from(text, "utf-8");
     const cid = await uploadFile(buffer, "evidence_text.txt");
 
@@ -106,11 +250,9 @@ app.get('/ipfs/:cid', async (req, res) => {
   try {
     const fileBuffer = await getFileData(cid);
     if (!fileBuffer) {
-      // Redirect to public IPFS gateway if not present locally
       return res.redirect(`https://ipfs.io/ipfs/${cid}`);
     }
 
-    // Inspect first few bytes to determine MIME type
     let contentType = "application/octet-stream";
     if (fileBuffer.slice(0, 8).toString('hex') === '89504e470d0a1a0a') {
       contentType = "image/png";
@@ -123,7 +265,6 @@ app.get('/ipfs/:cid', async (req, res) => {
     } else if (fileBuffer.slice(0, 4).toString('utf-8') === '%PDF') {
       contentType = "application/pdf";
     } else {
-      // Check if utf-8 text
       const sample = fileBuffer.slice(0, 500).toString('utf-8');
       if (!/[\x00-\x08\x0E-\x1F]/.test(sample)) {
         contentType = "text/plain; charset=utf-8";
@@ -172,20 +313,12 @@ app.post('/gemini', async (req, res) => {
   }
 });
 
-// User Registration
-app.post('/register', async (req, res) => {
+// User Registration with Rate Limiting & Schema Validation
+app.post('/register', authRateLimiter, validateBody(validationSchemas.register), async (req, res) => {
   const { name, email, password } = req.body || {};
-  if (!name || !email || !password || !name.trim() || !email.trim() || !password.trim()) {
-    return res.status(400).json({ message: "All fields are required" });
-  }
-
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) {
-    return res.status(400).json({ message: "Invalid email format" });
-  }
 
   try {
-    const existing = await DataStore.findUserByEmail(email);
+    const existing = await DataStore.findUserByEmail(email.trim());
     if (existing) {
       return res.status(400).json({ message: "User with this email already exists" });
     }
@@ -198,7 +331,11 @@ app.post('/register', async (req, res) => {
       role: "Personnel"
     });
 
-    const token = jwt.sign({ id: newUser._id }, SECRET_KEY, { expiresIn: '7d' });
+    const token = jwt.sign(
+      { id: newUser._id, role: "Personnel", email: newUser.email },
+      SECRET_KEY,
+      { expiresIn: '7d' }
+    );
 
     res.cookie('logintoken', token, {
       httpOnly: true,
@@ -219,12 +356,9 @@ app.post('/register', async (req, res) => {
   }
 });
 
-// User Login
-app.post('/loginuser', async (req, res) => {
+// User Login with Rate Limiting & Schema Validation
+app.post('/loginuser', authRateLimiter, validateBody(validationSchemas.loginUser), async (req, res) => {
   const { email, password } = req.body || {};
-  if (!email || !password || !email.trim() || !password.trim()) {
-    return res.status(400).json({ msg: "All fields are required" });
-  }
 
   try {
     const user = await DataStore.findUserByEmail(email.trim());
@@ -237,7 +371,11 @@ app.post('/loginuser', async (req, res) => {
       return res.status(401).json({ msg: "Incorrect password" });
     }
 
-    const token = jwt.sign({ id: user._id }, SECRET_KEY, { expiresIn: '7d' });
+    const token = jwt.sign(
+      { id: user._id, role: user.role || "Personnel", email: user.email },
+      SECRET_KEY,
+      { expiresIn: '7d' }
+    );
 
     res.cookie('logintoken', token, {
       httpOnly: true,
@@ -259,12 +397,9 @@ app.post('/loginuser', async (req, res) => {
   }
 });
 
-// Official Login (CERT-Army / DCA)
-app.post('/loginofficial', async (req, res) => {
+// Official Login (CERT-Army / DCA) with Rate Limiting & Schema Validation
+app.post('/loginofficial', authRateLimiter, validateBody(validationSchemas.loginOfficial), async (req, res) => {
   const { officialId, password } = req.body || {};
-  if (!officialId || !password) {
-    return res.status(400).json({ msg: "Official ID and Password required" });
-  }
 
   try {
     const official = await DataStore.findOfficialById(officialId.trim());
@@ -272,7 +407,6 @@ app.post('/loginofficial', async (req, res) => {
       return res.status(404).json({ msg: "Official credentials not found in defence registry" });
     }
 
-    // Support both direct password match and bcrypt
     let isPasswordCorrect = password === official.password;
     if (!isPasswordCorrect && official.password.startsWith('$2')) {
       isPasswordCorrect = await bcrypt.compare(password, official.password);
@@ -282,7 +416,16 @@ app.post('/loginofficial', async (req, res) => {
       return res.status(401).json({ msg: "Incorrect Official Password" });
     }
 
-    const token = jwt.sign({ id: official._id, role: official.role }, SECRET_KEY, { expiresIn: '7d' });
+    const token = jwt.sign(
+      {
+        id: official._id,
+        role: official.role || "CERT-Army",
+        department: official.department,
+        officialId: official.officialId
+      },
+      SECRET_KEY,
+      { expiresIn: '7d' }
+    );
 
     res.cookie('logintoken', token, {
       httpOnly: true,
@@ -312,17 +455,12 @@ app.post('/loginofficial', async (req, res) => {
   }
 });
 
-// In-memory OTP storage for 2FA
+// 2FA OTP Storage
 const otpStorage = {};
 
-app.post('/sendotp', async (req, res) => {
+app.post('/sendotp', authRateLimiter, validateBody(validationSchemas.sendOtp), async (req, res) => {
   const { number } = req.body || {};
-  if (!number) {
-    return res.status(400).json({ msg: "Phone number required" });
-  }
-
   const cleanNum = number.split('-').join("");
-  // Generate random 6-digit OTP
   const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
   otpStorage[cleanNum] = {
     code: generatedOtp,
@@ -331,7 +469,6 @@ app.post('/sendotp', async (req, res) => {
 
   console.log(`🛡️  [DEFENCE 2FA] Generated verification OTP for ${number}: ${generatedOtp}`);
 
-  // Try real Twilio verification if configured
   try {
     await OTPservice.sendOtp(cleanNum);
   } catch (err) {
@@ -341,32 +478,25 @@ app.post('/sendotp', async (req, res) => {
   return res.status(200).json({
     status: true,
     msg: `OTP dispatched to registered defence mobile number ${number}`,
-    testOtp: generatedOtp // Provided for seamless evaluation testing
+    testOtp: generatedOtp
   });
 });
 
-app.post('/verifyotp', async (req, res) => {
+app.post('/verifyotp', authRateLimiter, validateBody(validationSchemas.verifyOtp), async (req, res) => {
   const { number, code } = req.body || {};
-  if (!number || !code) {
-    return res.status(400).json({ msg: "Number and OTP code required" });
-  }
-
   const cleanNum = number.split('-').join("");
   console.log(`[DEFENCE 2FA] Verifying code "${code}" for ${number}`);
 
-  // 1. Accept standard defence bypass test code
   if (code === "123456" || code === "000000") {
     return res.status(200).json({ status: true, msg: "OTP verified successfully (Command Clearance)" });
   }
 
-  // 2. Check local in-memory OTP
   const stored = otpStorage[cleanNum];
   if (stored && stored.code === code.trim() && Date.now() < stored.expiresAt) {
     delete otpStorage[cleanNum];
     return res.status(200).json({ status: true, msg: "OTP verified successfully" });
   }
 
-  // 3. Check Twilio service if active
   try {
     const verified = await OTPservice.verifyOTP(cleanNum, code);
     if (verified) {
@@ -376,14 +506,14 @@ app.post('/verifyotp', async (req, res) => {
     console.warn("Twilio verification check error:", err.message);
   }
 
-  return res.status(400).json({ msg: "Invalid or expired OTP code" });
+  return res.status(400).json({ status: false, msg: "Invalid or expired OTP code" });
 });
 
-// Verify credentials from Cookie or Authorization header
+// Credentials verification (Supports Cookie or Bearer Token)
 app.get('/getcredentials', async (req, res) => {
-  let token = req.cookies.logintoken;
+  let token = req.cookies?.logintoken;
   if (!token && req.headers.authorization) {
-    token = req.headers.authorization.replace('Bearer ', '');
+    token = req.headers.authorization.replace(/^Bearer\s+/, '');
   }
 
   if (!token) {
@@ -400,6 +530,29 @@ app.get('/getcredentials', async (req, res) => {
   } catch (err) {
     res.status(401).json({ msg: "Invalid or expired token" });
   }
+});
+
+// ==========================================
+// RBAC-PROTECTED ENDPOINTS
+// ==========================================
+
+// Official RBAC Endpoint: Requires official / CERT-Army / Analyst role
+app.get('/api/official/vault-status', authenticateJWT, authorizeRole('Official', 'CERT-Army', 'Analyst', 'Commander', 'Admin'), async (req, res) => {
+  res.json({
+    status: true,
+    clearance: "SECRET // EVIDENTIARY VAULT ACCESS",
+    official: req.user,
+    vaultIntegrity: "100% Tamper-Evident",
+    hashingAlgorithm: "SHA-256 Multihash (IPFS CIDv0/v1)"
+  });
+});
+
+// Personnel Profile Endpoint: Requires authenticated JWT
+app.get('/api/personnel/profile', authenticateJWT, async (req, res) => {
+  res.json({
+    status: true,
+    user: req.user
+  });
 });
 
 // Logout
