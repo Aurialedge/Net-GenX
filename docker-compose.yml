@@ -33,6 +33,9 @@ services:
       - SECRET_KEY=netgenx_defence_cyber_shield_secret_key_2025
       - ML_SERVICE_URL=http://ml-service:5000
       - BLOCKCHAIN_URL=http://blockchain-ledger:9000
+    env_file:
+      - path: ./ipfs/.env
+        required: false
     depends_on:
       ml-service:
         condition: service_healthy
