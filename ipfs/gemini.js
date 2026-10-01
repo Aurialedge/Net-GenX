@@ -71,10 +71,15 @@ Do not include any markdown or text outside JSON.
   if (ai) {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const response = await ai.models.generateContent({
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Google Gemini API request timeout")), 3500)
+        );
+        const generatePromise = ai.models.generateContent({
           model: "gemini-3.8-flash",
           contents: [{ type: "text", text: prefixPrompt + "\n" + prompt }],
         });
+
+        const response = await Promise.race([generatePromise, timeoutPromise]);
 
         let output = response.text || response?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
         output = output.replace(/```json|```/g, "").trim();
@@ -88,10 +93,9 @@ Do not include any markdown or text outside JSON.
           return jsonOutput;
         }
       } catch (err) {
-        console.warn(`[GEMINI API] Attempt ${attempt} notice:`, err.message.slice(0, 120));
-        if (attempt < 3 && err.message.includes("503")) {
-          await new Promise(r => setTimeout(r, 1500));
-        }
+        console.warn(`[GEMINI API] Notice:`, err.message.slice(0, 100));
+        // If Google server is overloaded (503), timeout, or rate-limited, immediately deploy defence playbook
+        break;
       }
     }
   }
