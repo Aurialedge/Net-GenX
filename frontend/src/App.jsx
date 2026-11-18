@@ -1,31 +1,40 @@
-import Landing from "./assets/components/landing";
-import './App.css'
-import ChatInterface from "./assets/components/chatting";
-import Auth from "./assets/components/auth";
-import Testing from "./assets/components/testing";
-import OfficialPage from "./assets/components/officialPage";
-import WorkflowAnimation from "./assets/components/WorkflowAnimation";
-import SecuritySystemExplainer from "./assets/components/SecuritySystemExplainer";
-import NotFound from "./assets/components/404";
-import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
+import { lazy, Suspense } from 'react'
+import { BrowserRouter as Router, Route, Routes } from 'react-router-dom'
+import { Spinner } from '@/components/ui/spinner'
 
-import Main from "./assets/components/main";
-const App = () => {
-    return (
-        <Router>
-            <Routes>
-                <Route path="/upload" element={<Landing />} />
-                <Route path="/chat" element={<ChatInterface />} />
-                <Route path="/auth" element={<Auth />} />
-                <Route path="/testing" element={<Testing />} />
-                <Route path="/" element={<Main />} />
-                <Route path="/officialpage" element={<OfficialPage />} />
-                <Route path="/workflow" element={<WorkflowAnimation />} />
-                <Route path="/explainer" element={<SecuritySystemExplainer />} />
-                <Route path="*" element={<NotFound />} />
-            </Routes>
-        </Router>
-    )
+// Each page is its own chunk: visitors download only the page they open.
+const Home = lazy(() => import('@/pages/home'))
+const Auth = lazy(() => import('@/pages/auth'))
+const Dashboard = lazy(() => import('@/pages/dashboard'))
+const Guidance = lazy(() => import('@/pages/guidance'))
+const Official = lazy(() => import('@/pages/official'))
+const HowItWorks = lazy(() => import('@/pages/how-it-works'))
+const NotFound = lazy(() => import('@/pages/not-found'))
+
+function PageFallback() {
+  return (
+    <div className="text-muted-foreground flex min-h-svh items-center justify-center gap-2 text-sm" role="status">
+      <Spinner /> Loading…
+    </div>
+  )
 }
 
-export default App
+// Routes are unchanged from the original app; /workflow and /explainer now share one page.
+export default function App() {
+  return (
+    <Router>
+      <Suspense fallback={<PageFallback />}>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/auth" element={<Auth />} />
+          <Route path="/upload" element={<Dashboard />} />
+          <Route path="/chat" element={<Guidance />} />
+          <Route path="/officialpage" element={<Official />} />
+          <Route path="/workflow" element={<HowItWorks />} />
+          <Route path="/explainer" element={<HowItWorks />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
+    </Router>
+  )
+}

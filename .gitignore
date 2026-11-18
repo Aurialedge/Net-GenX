@@ -24,6 +24,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+# the frontend's shared modules (api, store, risk, utils) are source, not a Python build dir
+!frontend/src/lib/
 lib64/
 parts/
 sdist/
