@@ -1,230 +1,384 @@
+"""
+NetGenX Level-1 AI Risk Engine.
+
+Primary path: the two trained heads in models/risk_model.joblib (train.py):
+  * category head - LogReg + calibrated LinearSVC ensemble -> WHAT the threat is;
+  * severity head - LOW/MEDIUM/HIGH LogReg -> HOW dangerous; the risk score is the
+    expected severity over its probabilities.
+Hard evidence (payload extensions, disguised executables, look-alike credential
+portals, extortion patterns) then sets floors (risk_rules.py).
+
+Resilience chain (the service must always answer):
+    saved model  ->  retrain in-process from the dataset  ->  lexicon heuristics
+Gemini is an *optional* second opinion for low-confidence cases only, behind a
+short timeout and a circuit breaker, so an offline box never stalls.
+"""
+import json
 import os
 import re
+import threading
+import time
+
 import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import Pipeline
 
-# Comprehensive defence threat training corpus
-DEFENCE_TRAINING_DATA = [
-    # Honeytrap & Operational Espionage (Category 1)
-    ("Hello handsome, saw you in uniform! Which regiment are you posted at in Leh? Can you share a picture of your bunker?", 1),
-    ("Hi Captain, I am a defence researcher writing a blog on Indian Army deployments near LAC. Which artillery units are currently active in your sector?", 1),
-    ("Sweetheart let's video call on WhatsApp. Why are you hiding your posting details? Are you at the forward base?", 1),
-    ("I love army officers. Can you tell me when your unit is moving to Jammu? It will be our little secret.", 1),
-    ("Dear officer, I am an international journalist offering 5000 USD for an interview about air defence radar locations in Punjab sector.", 1),
-    ("Hey Major, send me your private photos. Don't worry, just tell me how many tanks are deployed in your brigade.", 1),
-    ("Looking for handsome defence personnel for friendship. Please share your duty roster and battalion number.", 1),
-    ("Are you deployed near the border? Please share live location so I can send you a special gift hamper.", 1),
-    ("Honey, can you send the movement order document of your troop train? I miss you and want to track your route.", 1),
-    ("I work with an NGO supporting defence families. Please share the names of all junior commissioned officers in your signals unit.", 1),
+from preprocessor import normalize, indicator_vector, INDICATOR_NAMES
+from risk_rules import evidence_adjust_with_notes
 
-    # Spear Phishing / Defence Portal Spoofing (Category 2)
-    ("URGENT: Your SPARSH defence pension account has been locked. Verify Aadhaar and PAN immediately at http://sparsh-pension-defence-update.xyz to avoid pension suspension.", 2),
-    ("ECHS Notice: Your military health card benefits will be terminated within 24 hours. Click here to update biometric details immediately.", 2),
-    ("Army Welfare Housing Organization (AWHO): You have been selected for preferential allotment in Delhi Cantt. Transfer 25000 processing fee to secure flat.", 2),
-    ("Notice from Principal Controller of Defence Accounts (PCDA): Dear Pensioner, submit your annual life certificate at this unofficial link now.", 2),
-    ("Indian Army Recruitment Board: Your CDS application requires immediate identity verification. Download and login via http://joinindianarmy-verification.in", 2),
-    ("Defence Salary Package (DSP) update: Your SBI military account requires immediate KYC refresh or ATM card will be blocked.", 2),
-    ("Army Postal Service: Your parcel containing military awards is held up. Pay customs clearance immediately to release.", 2),
-    ("Hamraaz Army app update required immediately: Your payslip cannot be generated until you verify password on this external link.", 2),
-    ("Urgent circular from ADG IT: All defence officers must submit personal email passwords for annual security audit via this form.", 2),
-    ("Ex-Servicemen Contributory Health Scheme: Claim your uncredited medical reimbursement by clicking this link and entering net banking OTP.", 2),
+TIERS = ("LOW", "MEDIUM", "HIGH")
+TIER_SCORE = (5.0, 62.0, 95.0)  # must match train.TIER_SCORE
 
-    # Malicious Payload & Defence Spyware (Category 3)
-    ("Download new Hamraaz_Army_v7.3.apk for viewing revised 8th Pay Commission salary allowances. Install and grant all permissions.", 3),
-    ("CONFIDENTIAL: Attached is the operational briefing PDF regarding upcoming bilateral military exercise. Enable macros to view content.", 3),
-    ("Updated Indian Army CSD canteen liquor quota application APK. Download and install on Android phone immediately.", 3),
-    ("Notice to all units: Download secure Indian Army messenger APK (SAMBHAV_patch.apk) from this Google Drive link.", 3),
-    ("Urgent operational order attached: OP_RAKSHAK_DIRECTIVE.docm. Please open in Microsoft Word and allow active content.", 3),
-    ("Attached is the Trojan reverse shell payload disguised as defence pay matrix spreadsheet.", 3),
-    ("Download Armed Forces Tribunal judgment file: AFT_judgment_summary.zip. Contains executable setup.exe to extract cases.", 3),
-    ("Defence intelligence alert script: Run this powershell script to patch security vulnerabilities in your military workstation.", 3),
-    ("Suspicious weaponized attachment detected containing exploit payload targeting army intranet terminals.", 3),
-    ("Malware beaconing detected to known foreign hostile command and control IP address 185.220.101.5.", 3),
+HERE = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(HERE, "models", "risk_model.joblib")
+METRICS_PATH = os.path.join(HERE, "models", "metrics.json")
 
-    # Command Impersonation & Social Engineering (Category 4)
-    ("Attention Jawan: This is Subedar Major speaking on instructions of the Commanding Officer. Transfer 10,000 INR emergency mess fund immediately.", 4),
-    ("Urgent call from Military Intelligence (MI) branch: Share the OTP received on your mobile right now for security clearance.", 4),
-    ("This is Brigadier Sharma from Southern Command HQ. I need the passwords of your regimental communications server immediately.", 4),
-    ("Join the unofficial WhatsApp group for 16th Cavalry officers to discuss upcoming deployment strategies.", 4),
-    ("Urgent directive: You have been assigned to confidential court of inquiry. Do not speak to anyone and transfer funds to officer welfare pool.", 4),
-    ("Commanding Officer order: Send the master access codes for unit secure comms link via unencrypted SMS.", 4),
-
-    # Benign / Safe Operational Activity (Category 0)
-    ("Annual sports day schedule for Army Public School has been released. Parents are requested to attend at 0900 hrs.", 0),
-    ("Standard Operating Procedure for station vehicle maintenance to be conducted every Saturday morning.", 0),
-    ("Station order: The military dental clinic will remain open on Wednesday from 0800 to 1400 hrs for routine checkups.", 0),
-    ("Good morning sir, submitting the weekly ration expenditure statement for unit mess audit.", 0),
-    ("Defence canteen goods arrival notice: Groceries and household goods available at CSD extension counter.", 0),
-    ("Routine circular regarding celebration of Vijay Diwas at the station war memorial.", 0),
-    ("Yoga session scheduled tomorrow morning at the station gymnasium for all personnel and families.", 0),
-    ("Quarterly family welfare meeting will be held at the community hall this Sunday.", 0),
-    ("Annual tree plantation drive organized across military cantonment premises.", 0),
-    ("Information regarding Central Government Health Scheme (CGHS) dispensary holiday schedule for Diwali.", 0),
-]
+ESCALATION_THRESHOLD = int(os.environ.get("ESCALATION_THRESHOLD", 80))
+MAX_TEXT_CHARS = 20000
 
 CATEGORY_NAMES = {
     0: "Benign / Normal Operational Communication",
     1: "Honeytrap & Cyber Espionage Attack",
     2: "Defence Phishing & Credential Harvesting",
     3: "Malicious Payload & Defence Spyware",
-    4: "Social Engineering & Command Impersonation"
-}
-
-CATEGORY_RISK_MAP = {
-    0: (5, 18),    # Low risk
-    1: (88, 98),   # Critical risk (Honeytrap)
-    2: (82, 94),   # High/Critical risk (Phishing)
-    3: (90, 99),   # Critical risk (Malware)
-    4: (75, 89)    # High risk (Impersonation)
+    4: "Blackmail, Extortion & Coercion",
+    5: "OPSEC Espionage & Reconnaissance",
 }
 
 MITIGATIONS = {
     0: [
         "Routine communication. Standard operational security protocols apply.",
         "Ensure sensitive military data is not transmitted over unclassified channels.",
-        "Maintain periodic password hygiene on defence portals."
+        "Maintain periodic password hygiene on defence portals.",
     ],
     1: [
         "IMMEDIATELY SEVER COMMUNICATION with the suspect contact. Do not reply or block without archiving.",
         "DO NOT SHARE any pictures in uniform, unit deployment details, weapon systems, or station rosters.",
         "IMMEDIATELY ISOLATE the device from defence intranets and Wi-Fi networks.",
-        "ESCALATION ACTIVATED: Incident details and cryptographic hash transmitted to CERT-Army.",
-        "REPORT TO MILITARY INTELLIGENCE (MI) Liaison Officer at your station headquarters immediately."
+        "PRESERVE the full chat history, profile links and phone numbers as evidence before blocking.",
+        "REPORT TO MILITARY INTELLIGENCE (MI) Liaison Officer at your station headquarters immediately.",
     ],
     2: [
         "DO NOT CLICK any links, open attachments, or submit Aadhaar/PAN/OTP details.",
         "DO NOT use unverified third-party portals for SPARSH, ECHS, or defence pension services.",
         "Verify all administrative notices solely through official .gov.in or .mil.in websites.",
         "Change credentials immediately for any military or banking accounts potentially exposed.",
-        "Report fake URLs to CERT-Army and National Cyber Crime Reporting Portal (NCRP)."
+        "Report fake URLs to CERT-Army and National Cyber Crime Reporting Portal (NCRP).",
     ],
     3: [
         "DO NOT INSTALL or execute any APKs, executables (.exe), or macro-enabled documents.",
         "Disconnect the infected device from mobile network, Wi-Fi, and Bluetooth immediately.",
         "Perform a full forensic scan using authorized military anti-malware tools.",
         "Hand over the physical device to Station Cyber Security Cell for dynamic sandbox analysis.",
-        "Change all master passwords from a separate, uncompromised defence workstation."
+        "Change all master passwords from a separate, uncompromised defence workstation.",
     ],
     4: [
-        "VERIFY SENDER IDENTITY independently through official military telephone directory or line communications.",
-        "NEVER share OTPs, financial credentials, or unit movement details over phone calls or WhatsApp.",
-        "Senior defence commanders will NEVER ask for money transfers or personal OTPs over messaging apps.",
-        "Log the caller's telephone number and WhatsApp profile for technical tracing by CERT-Army.",
-        "Brief family members and junior personnel regarding unauthorized command impersonation schemes."
-    ]
+        "DO NOT SUCCUMB to coercion, blackmail, or demands for military documents.",
+        "Preserve complete unedited chat histories, phone numbers, and digital evidence.",
+        "Disconnect device and report immediately to Station Counter-Intelligence & Provost Marshal.",
+        "Do not negotiate or make any financial transfers to the extortionist.",
+    ],
+    5: [
+        "REFUSE DISCLOSURE of equipment, movement, radar locations, weapon systems, or troop strength.",
+        "Flag unauthorized inquiry to Military Intelligence (MI) and Station Cyber Cell immediately.",
+        "Verify credentials of any alleged defence researcher or defense journalist.",
+        "Log caller/sender details for cryptographic tracking on the NetGenX Incident Ledger.",
+    ],
 }
 
+EXECUTABLE_EXT = (".apk", ".exe", ".scr", ".bat", ".cmd", ".vbs", ".ps1", ".msi", ".jar", ".hta", ".lnk", ".js")
+MACRO_EXT = (".docm", ".xlsm", ".pptm")
+TEXT_EXT = (".txt", ".csv", ".log", ".json", ".eml", ".md", ".html", ".htm", ".xml")
+MEDIA_EXT = (".jpg", ".jpeg", ".png", ".webp", ".heic", ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus",
+             ".mp4", ".mkv", ".mov", ".avi", ".webm")
 
-class ThreatClassifier:
-    def __init__(self):
-        texts = [item[0] for item in DEFENCE_TRAINING_DATA]
-        labels = [item[1] for item in DEFENCE_TRAINING_DATA]
 
-        self.pipeline = Pipeline([
-            ('tfidf', TfidfVectorizer(ngram_range=(1, 2), lowercase=True, max_features=1000)),
-            ('clf', LogisticRegression(C=5.0, max_iter=200))
-        ])
-        self.pipeline.fit(texts, labels)
+def threat_level(score):
+    return "CRITICAL" if score >= 85 else "HIGH" if score >= 70 else "MEDIUM" if score >= 40 else "LOW"
 
-    def analyze_text(self, text):
-        if not text or not text.strip():
-            return self._build_result(0, 0.95, "Empty input provided.")
 
-        cleaned = text.strip()
-        lower = cleaned.lower()
+class _HeuristicModel:
+    """Last-resort classifier used only if no ML model can be loaded or trained."""
+    classes_ = np.arange(6)
 
-        # Heuristic overrides for high-severity defence triggers
-        honeytrap_triggers = ["regiment", "posted at", "bunker", "lac", "loc", "duty roster", "handsome", "in uniform", "deployment details", "video call", "live location", "miss you"]
-        phishing_triggers = ["sparsh", "echs", "pcda", "pension", "verify aadhaar", "kyc", "locked", "awho", "hamraaz", "salary held", "atm card", "login via"]
-        malware_triggers = [".apk", ".exe", ".docm", ".vbs", "powershell", "reverse shell", "trojan", "payload", "install on android", "macro"]
-        impersonation_triggers = ["subedar major", "commanding officer", "brigadier", "military intelligence", "transfer 10,000", "emergency mess", "court of inquiry"]
+    def predict_proba(self, texts):
+        out = []
+        for t in texts:
+            v = dict(zip(INDICATOR_NAMES, indicator_vector(t)))
+            logits = np.array([
+                1.5,
+                1.2 * v["lx_romance"] + 0.8 * v["lx_media_request"] + 0.6 * v["lx_personal_probe"],
+                1.0 * v["suspicious_url"] + 0.8 * v["lx_credential"] + 0.8 * v["lx_admin_lure"],
+                2.5 * v["dropper_ext"] + 0.9 * v["lx_malware"],
+                1.6 * v["lx_coercion"],
+                1.0 * v["lx_opsec"] + 0.6 * v["lx_personal_probe"],
+            ])
+            e = np.exp(logits - logits.max())
+            out.append(e / e.sum())
+        return np.asarray(out)
 
-        ht_count = sum(1 for w in honeytrap_triggers if w in lower)
-        ph_count = sum(1 for w in phishing_triggers if w in lower)
-        mal_count = sum(1 for w in malware_triggers if w in lower)
-        imp_count = sum(1 for w in impersonation_triggers if w in lower)
 
-        pred_class = self.pipeline.predict([cleaned])[0]
-        probs = self.pipeline.predict_proba([cleaned])[0]
-        confidence = float(np.max(probs))
+class _HeuristicTier:
+    """Severity fallback: splits the heuristic threat mass evenly over MEDIUM/HIGH."""
 
-        # Heuristic boost
-        if mal_count >= 1:
-            pred_class = 3
-            confidence = max(confidence, 0.96)
-        elif ht_count >= 2:
-            pred_class = 1
-            confidence = max(confidence, 0.94)
-        elif ph_count >= 2:
-            pred_class = 2
-            confidence = max(confidence, 0.93)
-        elif imp_count >= 2:
-            pred_class = 4
-            confidence = max(confidence, 0.91)
+    def predict_proba(self, texts):
+        p0 = _HeuristicModel().predict_proba(texts)[:, 0]
+        return np.stack([p0, (1 - p0) / 2, (1 - p0) / 2], axis=1)
 
-        return self._build_result(pred_class, confidence, cleaned)
 
-    def analyze_file(self, filename, content_bytes, mime_type=""):
-        name_lower = filename.lower()
-        extracted_text = ""
+def script_supported(t, min_share=0.5):
+    """True if most letters are Latin or Devanagari (the scripts the model was trained on)."""
+    import unicodedata
+    letters = [ch for ch in t if unicodedata.category(ch).startswith(("L", "M"))]
+    if not letters:
+        return True  # digits / punctuation / emoji only: the model handles these
+    known = sum(ord(ch) < 0x0250 or 0x0900 <= ord(ch) <= 0x097F for ch in letters)
+    return known / len(letters) >= min_share
 
-        # Check for dangerous file extensions
-        if any(name_lower.endswith(ext) for ext in [".apk", ".exe", ".scr", ".bat", ".cmd", ".vbs", ".ps1"]):
-            return self._build_result(3, 0.98, f"Suspicious executable or package detected: {filename}")
 
-        if any(name_lower.endswith(ext) for ext in [".docm", ".xlsm", ".pptm"]):
-            return self._build_result(3, 0.94, f"Macro-enabled defence document detected: {filename}")
+def risk_from_tier_proba(p):
+    return float(sum(pi * s for pi, s in zip(p, TIER_SCORE)))
 
-        # Text / Document content extraction
+
+class RiskEngine:
+    def __init__(self, model_path=MODEL_PATH):
+        self.model_path = model_path
+        self.lock = threading.RLock()
+        self.pipeline = None
+        self.tier_pipeline = None
+        self.engine_name = "uninitialised"
+        self.model_info = {}
+        self._gemini_open_until = 0.0
+        self.gemini_key = self._resolve_gemini_key()
+        self.gemini_enabled = os.environ.get("NETGENX_ENABLE_GEMINI", "1") != "0"
+        self.gemini_model = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+        self.load()
+
+    # ------------------------------------------------------------------ loading
+    def load(self):
+        with self.lock:
+            for attempt in (self._load_saved, self._train_in_process):
+                try:
+                    pipe, tier, info = attempt()
+                    pipe.predict_proba(["health check transmission"])  # smoke test
+                    tier.predict_proba(["health check transmission"])
+                    self.pipeline, self.tier_pipeline, self.model_info = pipe, tier, info
+                    self.engine_name = info.get("engine", "Local ML")
+                    print(f"[AI-ENGINE] Level-1 model ready: {self.engine_name} v{info.get('version')}")
+                    return True
+                except Exception as e:
+                    print(f"[AI-ENGINE] model source failed ({attempt.__name__}): {e}")
+            self.pipeline, self.tier_pipeline = _HeuristicModel(), _HeuristicTier()
+            self.engine_name = "Lexicon Heuristics (degraded)"
+            self.model_info = {"version": "fallback", "engine": self.engine_name}
+            print("[AI-ENGINE] WARNING: running on heuristic fallback")
+            return False
+
+    ENGINE_LABEL = "TF-IDF + LogReg/SVM ensemble + severity model"
+
+    def _load_saved(self):
+        import joblib
+        import sklearn
+        bundle = joblib.load(self.model_path)
+        if bundle.get("sklearn_version") != sklearn.__version__:
+            raise RuntimeError(f"model built with sklearn {bundle.get('sklearn_version')}, runtime is {sklearn.__version__}")
+        if "tier_pipeline" not in bundle:
+            raise RuntimeError(f"model v{bundle.get('version')} has no severity head (pre-v4); retraining")
+        return bundle["pipeline"], bundle["tier_pipeline"], {
+            "version": bundle.get("version"), "trained_at": bundle.get("trained_at"),
+            "engine": f"{self.ENGINE_LABEL} (trained)"}
+
+    def _train_in_process(self):
+        import train  # retrain from the dataset; slow-ish (~30s) but self-healing
+        import augment
+        pipe, tier = train.fit_models(train.load_base_dataset(), augment.generate_graded(), 10.0, 10.0)
         try:
-            sample = content_bytes[:4000].decode('utf-8', errors='ignore')
-            extracted_text = sample
+            import joblib
+            import sklearn
+            os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
+            joblib.dump({"pipeline": pipe, "tier_pipeline": tier, "version": train.MODEL_VERSION,
+                         "sklearn_version": sklearn.__version__, "tier_score": TIER_SCORE,
+                         "trained_at": time.strftime("%Y-%m-%dT%H:%M:%S")}, self.model_path + ".tmp")
+            os.replace(self.model_path + ".tmp", self.model_path)
+        except Exception as e:
+            print(f"[AI-ENGINE] could not persist retrained model: {e}")
+        return pipe, tier, {"version": train.MODEL_VERSION, "engine": f"{self.ENGINE_LABEL} (self-healed)"}
+
+    def metrics(self):
+        try:
+            with open(METRICS_PATH, encoding="utf-8") as f:
+                return json.load(f)
         except Exception:
-            extracted_text = filename
+            return None
 
-        # If audio or video, analyze filename and metadata
-        if "audio" in mime_type or any(name_lower.endswith(ext) for ext in [".mp3", ".wav", ".m4a", ".aac", ".ogg"]):
-            extracted_text += " audio communication recording " + filename
+    # ------------------------------------------------------------------ gemini
+    def _resolve_gemini_key(self):
+        key = os.environ.get("GEMINI_KEY")
+        env_file = os.path.join(HERE, "..", "ipfs", ".env")
+        if not key and os.path.exists(env_file):
+            try:
+                with open(env_file, encoding="utf-8") as f:
+                    for line in f:
+                        if line.startswith("GEMINI_KEY="):
+                            key = line.split("=", 1)[1].strip().strip('"')
+            except Exception:
+                pass
+        return key or None
 
-        if "video" in mime_type or any(name_lower.endswith(ext) for ext in [".mp4", ".mkv", ".mov", ".avi"]):
-            extracted_text += " video transmission " + filename
+    def _gemini_second_opinion(self, text):
+        if not (self.gemini_key and self.gemini_enabled) or time.time() < self._gemini_open_until:
+            return None
+        try:
+            import requests
+            prompt = (
+                "You are a military counter-intelligence analyst. Classify the message into exactly one category id: "
+                + json.dumps(CATEGORY_NAMES)
+                + '. Respond as JSON {"category_id": int, "risk_score": int 0-100, "reasoning": str}.\nMessage: """'
+                + text[:4000] + '"""')
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.gemini_model}:generateContent"
+            resp = requests.post(url, params={"key": self.gemini_key}, timeout=4, json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.0, "responseMimeType": "application/json"}})
+            resp.raise_for_status()
+            data = json.loads(resp.json()["candidates"][0]["content"]["parts"][0]["text"])
+            cat = int(data["category_id"])
+            if cat not in CATEGORY_NAMES:
+                raise ValueError("bad category")
+            return {"category_id": cat, "risk_score": max(0, min(100, int(data["risk_score"]))),
+                    "reasoning": str(data.get("reasoning", ""))[:500]}
+        except Exception as e:
+            self._gemini_open_until = time.time() + 300  # circuit breaker: back off 5 min
+            print(f"[AI-ENGINE] Gemini second opinion unavailable ({type(e).__name__}); breaker open for 5 min")
+            return None
 
-        if "image" in mime_type or any(name_lower.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp"]):
-            extracted_text += " visual photographic evidence " + filename
+    # ------------------------------------------------------------------ scoring
+    def analyze_text(self, text):
+        raw = (text or "")[:MAX_TEXT_CHARS]
+        t = normalize(raw)
+        if not t:
+            return self._build(0, np.eye(6)[0], 2.0, "Empty input provided.", [])
+        if not script_supported(t):
+            # The model has only seen Latin and Devanagari text; on other scripts its output is
+            # noise. Score from language-independent hard evidence only and say so plainly.
+            cat, score, notes = evidence_adjust_with_notes(t, 0, 10.0)
+            notes.append("language/script not supported by the AI model, so only links, attachments and "
+                         "credential requests were checked; submit an English or Hindi translation for full analysis")
+            out = self._build(cat, np.full(6, 1 / 6), score, t, notes, self.engine_name + " (script not supported)")
+            out["language_supported"] = False
+            return out
+        with self.lock:
+            pipe, tier = self.pipeline, self.tier_pipeline
+        try:
+            proba = pipe.predict_proba([t])[0]
+            tier_p = tier.predict_proba([t])[0]
+            engine = self.engine_name
+        except Exception as e:  # model corrupted at runtime -> heuristic for this call, reload in background
+            print(f"[AI-ENGINE] inference failed: {e}; using heuristic fallback")
+            proba = _HeuristicModel().predict_proba([t])[0]
+            tier_p = _HeuristicTier().predict_proba([t])[0]
+            engine = "Lexicon Heuristics (degraded)"
+            threading.Thread(target=self.load, daemon=True).start()
 
-        return self.analyze_text(extracted_text if extracted_text.strip() else filename)
+        score = risk_from_tier_proba(tier_p)
+        cat = int(np.argmax(proba))
+        if score >= 40 and cat == 0:  # severity head says risky: name the most likely threat
+            cat = int(np.argmax(proba[1:]) + 1)
+        cat, score, notes = evidence_adjust_with_notes(t, cat, score)
 
-    def _build_result(self, pred_class, confidence, raw_input):
-        risk_range = CATEGORY_RISK_MAP[pred_class]
-        # Calculate risk score proportional to confidence
-        score = int(risk_range[0] + (risk_range[1] - risk_range[0]) * confidence)
-        score = min(100, max(0, score))
+        reasoning = None
+        if max(tier_p) < 0.55 and 30 <= score <= 85:  # genuinely ambiguous -> optional LLM second opinion
+            g = self._gemini_second_opinion(t)
+            if g:
+                score = 0.5 * score + 0.5 * g["risk_score"]
+                cat = g["category_id"] if g["risk_score"] >= 40 or cat == 0 else cat
+                reasoning = g["reasoning"]
+                engine += " + Gemini second opinion"
+        if score < 40:
+            cat = 0
+        out = self._build(cat, proba, score, t, notes, engine, reasoning)
+        out["severity_probabilities"] = {k: round(float(p), 4) for k, p in zip(TIERS, tier_p)}
+        return out
 
-        threat_level = "LOW"
-        if score >= 85:
-            threat_level = "CRITICAL"
-        elif score >= 70:
-            threat_level = "HIGH"
-        elif score >= 40:
-            threat_level = "MEDIUM"
-
-        category_title = CATEGORY_NAMES[pred_class]
-        mitigations = MITIGATIONS[pred_class]
-
+    def _build(self, cat, proba, score, raw, notes, engine=None, reasoning=None):
+        score = int(round(max(0.0, min(100.0, score))))
+        title = CATEGORY_NAMES[cat]
+        conf = float(proba[cat]) if cat < len(proba) else float(max(proba))
+        details = f"Level-1 risk engine: {title} (model confidence {conf * 100:.1f}%)."
+        if notes:
+            details += " Hard evidence: " + "; ".join(notes) + "."
+        if reasoning:
+            details += f" LLM analyst: {reasoning}"
         return {
             "status": True,
-            "final_prediction": category_title,
-            "final_confidence": round(confidence * 100, 1),
+            "category_id": cat,
+            "final_prediction": title,
+            "final_confidence": round(conf * 100, 1),
             "final_risk_score": score,
-            "threat_type": category_title.split("&")[0].strip(),
-            "threat_level": threat_level,
-            "details": f"AI Engine analyzed input with {round(confidence * 100, 1)}% confidence. Categorized as {category_title}.",
-            "mitigation_steps": mitigations,
-            "escalate_cert_army": score >= 80
+            "threat_type": title.split("&")[0].strip(),
+            "threat_level": threat_level(score),
+            "details": details,
+            "mitigation_steps": MITIGATIONS[cat] if score >= 40 or cat == 0 else MITIGATIONS[0],
+            "escalate_cert_army": score >= ESCALATION_THRESHOLD,
+            "escalation_threshold": ESCALATION_THRESHOLD,
+            "class_probabilities": {CATEGORY_NAMES[i].split(" ")[0].strip("/,"): round(float(p), 4) for i, p in enumerate(proba)},
+            "analysis_engine": engine or self.engine_name,
         }
 
+    # ------------------------------------------------------------------ files
+    @staticmethod
+    def sniff_file(filename, content):
+        """Magic-byte inspection: catches executables disguised with harmless extensions."""
+        name = (filename or "").lower()
+        head = content[:8]
+        findings = []
+        if head[:2] == b"MZ":
+            findings.append(("windows_executable", 3, 97))
+        elif head[:4] == b"\x7fELF":
+            findings.append(("linux_executable", 3, 95))
+        elif head[:4] == b"PK\x03\x04":
+            window = content[:200000]
+            if b"AndroidManifest.xml" in window or b"classes.dex" in window:
+                findings.append(("android_apk_package", 3, 96))
+            elif b"vbaProject.bin" in window:
+                findings.append(("office_document_with_vba_macros", 3, 92))
+        elif head[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" and (b"VBA" in content[:500000] or b"Macros" in content[:500000]):
+            findings.append(("legacy_office_with_macros", 3, 90))
+        elif head[:4] == b"%PDF":
+            window = content[:2_000_000]
+            if any(k in window for k in (b"/JavaScript", b"/JS ", b"/Launch", b"/EmbeddedFile")):
+                findings.append(("pdf_with_active_content", 3, 85))
+        if name.endswith(EXECUTABLE_EXT):
+            findings.append(("executable_extension", 3, 95))
+        elif name.endswith(MACRO_EXT):
+            findings.append(("macro_enabled_document", 3, 92))
+        if re.search(r"\.(?:pdf|docx?|jpe?g|png|txt)\.(?:exe|scr|apk|bat|js|vbs)$", name):
+            findings.append(("double_extension_masquerade", 3, 98))
+        if findings and findings[0][0].endswith(("executable", "apk_package")) and not name.endswith(EXECUTABLE_EXT):
+            findings.append(("extension_content_mismatch", 3, 98))
+        return findings
 
-# Singleton model instance
-detector = ThreatClassifier()
+    def extract_text(self, filename, content, mime_type=""):
+        name = (filename or "").lower()
+        if name.endswith(TEXT_EXT) or mime_type.startswith("text"):
+            return content[:MAX_TEXT_CHARS * 4].decode("utf-8", errors="ignore")
+        if name.endswith(MEDIA_EXT) or mime_type.startswith(("image", "audio", "video")):
+            return ""  # no OCR / ASR on this box; provenance handled by shield layer 3
+        # generic binary (pdf/docx...): pull printable runs as a best-effort text sample
+        runs = re.findall(rb"[\x20-\x7e]{6,}", content[:2_000_000])
+        return b" ".join(runs)[:MAX_TEXT_CHARS].decode("ascii", errors="ignore")
+
+    def analyze_file(self, filename, content, mime_type=""):
+        findings = self.sniff_file(filename, content)
+        text = self.extract_text(filename, content, mime_type)
+        base = self.analyze_text(text) if text.strip() else self._build(
+            0, np.eye(6)[0], 10.0, filename, ["media content not transcribed; metadata/provenance checked by Counter-Intel layer 3"])
+        if findings:
+            top = max(findings, key=lambda f: f[2])
+            if top[2] > base["final_risk_score"]:
+                base = self._build(3, np.eye(6)[3] * 0.97 + 0.005, top[2], filename,
+                                   [f"{f[0]}" for f in findings])
+        base["file_findings"] = [f[0] for f in findings]
+        base["file_name"] = filename
+        base["text_extracted_chars"] = len(text)
+        return base
+
+
+detector = RiskEngine()

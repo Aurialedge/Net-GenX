@@ -1,0 +1,266 @@
+{
+  "model_version": "4.0.0",
+  "trained_at": "2026-11-18T14:22:10.449354+00:00",
+  "sklearn_version": "1.6.1",
+  "algorithms": {
+    "features": "word 1-2gram TF-IDF + char_wb 2-5gram TF-IDF + 21 threat indicators",
+    "category_head": "soft-voting ensemble: LogisticRegression + sigmoid-calibrated LinearSVC",
+    "severity_head": "multinomial LogisticRegression (LOW/MEDIUM/HIGH)",
+    "risk_score": "expected severity, tier scores {'low': 5.0, 'medium': 62.0, 'high': 95.0}, plus hard-evidence floors"
+  },
+  "train_size": 4641,
+  "unique_dataset_texts": 211,
+  "augmentation_samples": 4430,
+  "augmentation_tiers": {
+    "low": 1410,
+    "medium": 930,
+    "high": 2090
+  },
+  "selected_C": 10.0,
+  "cv": {
+    "n": 4641,
+    "category_accuracy": 0.995,
+    "category_macro_f1": 0.9954,
+    "threats_flagged@40": 0.9966,
+    "benign_false_alarm@40": 0.0042,
+    "band_accuracy": 0.9879,
+    "high_escalated@80": 0.9816,
+    "non_high_wrongly_escalated@80": 0.0008,
+    "band_confusion(rows=want low/med/high)": [
+      [
+        1419,
+        4,
+        2
+      ],
+      [
+        8,
+        922,
+        0
+      ],
+      [
+        3,
+        39,
+        2244
+      ]
+    ]
+  },
+  "heldout": {
+    "challenge_set.csv": {
+      "n": 44,
+      "category_accuracy": 1.0,
+      "category_macro_f1": 1.0,
+      "threats_flagged@40": 1.0,
+      "benign_false_alarm@40": 0.0,
+      "category_confusion": [
+        [
+          15,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          9,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          5,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          5,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          4,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          6
+        ]
+      ],
+      "errors": []
+    },
+    "challenge_set_v2.csv": {
+      "n": 30,
+      "category_accuracy": 1.0,
+      "category_macro_f1": 1.0,
+      "threats_flagged@40": 1.0,
+      "benign_false_alarm@40": 0.0,
+      "category_confusion": [
+        [
+          10,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          4,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          4,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          4,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          4,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          4
+        ]
+      ],
+      "errors": []
+    },
+    "eval_realworld.csv": {
+      "n": 47,
+      "category_accuracy": 1.0,
+      "category_macro_f1": 1.0,
+      "threats_flagged@40": 1.0,
+      "benign_false_alarm@40": 0.0,
+      "band_accuracy": 0.9362,
+      "high_escalated@80": 1.0,
+      "non_high_wrongly_escalated@80": 0.125,
+      "band_confusion(rows=want low/med/high)": [
+        [
+          15,
+          0,
+          0
+        ],
+        [
+          0,
+          6,
+          3
+        ],
+        [
+          0,
+          0,
+          23
+        ]
+      ],
+      "category_confusion": [
+        [
+          15,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          6,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          9,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          6,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          5,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          6
+        ]
+      ],
+      "errors": [
+        {
+          "text": "Hi handsome, you have such a kind smile in your DP. Are you in the army? My cousin is also in defence. Can we chat sometime?",
+          "category": 1,
+          "band": "medium",
+          "pred": 1,
+          "score": 87.2
+        },
+        {
+          "text": "Hey, what does a typical day look like for you at the base? What time do you guys usually go out on patrol?",
+          "category": 5,
+          "band": "medium",
+          "pred": 5,
+          "score": 93.0
+        },
+        {
+          "text": "Which station are you posted at these days? Is it near the border?",
+          "category": 5,
+          "band": "medium",
+          "pred": 5,
+          "score": 94.5
+        }
+      ]
+    }
+  },
+  "training_seconds": 64.8
+}

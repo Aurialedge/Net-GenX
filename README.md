@@ -17,9 +17,14 @@ Defence cyber incident reports frequently suffer from delayed response times bec
 
 ## 🚀 Quick Start (1-Click Run)
 
-To start all 4 microservices simultaneously on Windows:
+To install missing dependencies and start all services on Windows:
 ```cmd
-start_all.bat
+start.bat
+```
+
+To stop all services:
+```cmd
+start.bat stop
 ```
 
 Or start individual services:

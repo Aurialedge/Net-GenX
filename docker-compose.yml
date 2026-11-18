@@ -1,4 +1,31 @@
 services:
+  # Multi-tier Service 0A: Live MongoDB Database Engine
+  mongodb:
+    image: mongo:latest
+    container_name: netgenx-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb-data:/data/db
+    networks:
+      - netgenx-network
+    restart: unless-stopped
+
+  # Multi-tier Service 0B: Official Kubo IPFS Daemon Node (Peer-to-Peer Storage)
+  ipfs-node:
+    image: ipfs/kubo:latest
+    container_name: netgenx-ipfs-node
+    ports:
+      - "4001:4001" # IPFS Swarm
+      - "5001:5001" # IPFS RPC API
+      - "8080:8080" # IPFS Gateway
+    volumes:
+      - ipfs-staging:/export
+      - ipfs-data:/data/ipfs
+    networks:
+      - netgenx-network
+    restart: unless-stopped
+
   # Multi-tier Service 1: Python AI Threat Inference Engine
   ml-service:
     build:
@@ -10,6 +37,10 @@ services:
     environment:
       - PORT=5000
       - PYTHONUNBUFFERED=1
+      - ESCALATION_THRESHOLD=80
+      - NETGENX_STATE_DIR=/app/state
+    volumes:
+      - ml-shield-state:/app/state
     networks:
       - netgenx-network
     restart: unless-stopped
@@ -18,7 +49,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      start_period: 30s
 
   # Multi-tier Service 2: IPFS Cryptographic Storage & Defence Security Gateway
   ipfs-gateway:
@@ -31,12 +62,17 @@ services:
     environment:
       - PORT=8000
       - SECRET_KEY=netgenx_defence_cyber_shield_secret_key_2025
+      - MONGODB=mongodb://mongodb:27017/netgenx
+      - IPFS_API_URL=http://ipfs-node:5001
+      - IPFS_GATEWAY_URL=http://ipfs-node:8080
       - ML_SERVICE_URL=http://ml-service:5000
       - BLOCKCHAIN_URL=http://blockchain-ledger:9000
     env_file:
       - path: ./ipfs/.env
         required: false
     depends_on:
+      - mongodb
+      - ipfs-node
       ml-service:
         condition: service_healthy
     volumes:
@@ -90,7 +126,15 @@ networks:
     name: netgenx-network
 
 volumes:
+  mongodb-data:
+    driver: local
+  ipfs-staging:
+    driver: local
+  ipfs-data:
+    driver: local
   ipfs-vault-data:
     driver: local
   blockchain-ledger-data:
+    driver: local
+  ml-shield-state:
     driver: local
