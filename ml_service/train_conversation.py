@@ -21,7 +21,6 @@ from datetime import datetime, timezone
 import numpy as np
 import joblib
 import sklearn
-from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 
@@ -29,17 +28,18 @@ os.environ.setdefault("NETGENX_ENABLE_GEMINI", "0")
 from model import detector                                     # noqa: E402  Level-1 risk model
 from conversation_data import generate_conversations          # noqa: E402
 from conversation_model import (build_turns_batch, conversation_context, featurize,  # noqa: E402
-                                FEATURE_NAMES, MODEL_PATH, TIER_SCORE)
+                                FEATURE_NAMES, MODEL_PATH, TIER_SCORE, OrdinalMonotoneClassifier)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 METRICS_PATH = os.path.join(HERE, "models", "conversation_metrics.json")
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 TIERS = ("low", "medium", "high")
 
 
 def to_roles(conv):
     me = conv["me"].lower()
-    return [{"text": m["text"], "ts": m["ts"], "role": "user" if m["sender"].lower() == me else "contact"} for m in conv["messages"]]
+    return [{"text": m["text"], "ts": m["ts"], "role": "user" if me and m["sender"].lower() == me else "contact"}
+            for m in conv["messages"]]
 
 
 def build_matrix(convs):
@@ -58,10 +58,10 @@ def build_matrix(convs):
 
 
 def make_model():
-    # shallow, heavily-leafed trees: synthetic data is clean, so an unconstrained model becomes
-    # near-certain and brittle at the boundaries of real conversations
-    return HistGradientBoostingClassifier(learning_rate=0.05, max_iter=300, max_leaf_nodes=15, min_samples_leaf=60,
-                                          l2_regularization=3.0, class_weight="balanced", random_state=0)
+    # ordinal (>=MEDIUM, HIGH) boosters with monotone constraints on risk evidence; shallow,
+    # heavily-leafed trees because the synthetic data is clean and boundaries must stay smooth
+    return OrdinalMonotoneClassifier(learning_rate=0.05, max_iter=300, max_leaf_nodes=15, min_samples_leaf=60,
+                                     l2_regularization=3.0, class_weight="balanced", random_state=0)
 
 
 def main():
@@ -104,7 +104,7 @@ def main():
     metrics = {"version": VERSION, "trained_at": datetime.now(timezone.utc).isoformat(), "sklearn_version": sklearn.__version__,
                "n_train": int(len(y)), "n_messages": int(sum(len(convs[i]["messages"]) for i in keep)),
                "tier_counts": {TIERS[k]: int((y == k).sum()) for k in range(3)},
-               "algorithm": f"HistGradientBoostingClassifier on {len(FEATURE_NAMES)} features from the Level-1 model and shield layers 1/3/4/5",
+               "algorithm": f"ordinal monotone-constrained HistGradientBoosting (P>=MEDIUM, P(HIGH)) on {len(FEATURE_NAMES)} features from the Level-1 model and shield layers 1/3/4/5",
                "features": FEATURE_NAMES, "synthetic_holdout": split, "training_seconds": round(time.time() - t0, 1)}
     if not args.no_save:
         os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)

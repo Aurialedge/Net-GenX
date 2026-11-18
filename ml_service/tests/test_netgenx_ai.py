@@ -415,3 +415,42 @@ def test_hard_evidence_in_one_message_still_escalates_a_benign_looking_chat(clie
     chat = "Neha: Dinner ho gaya?\nKaran: Haan\nNeha: Miss you. Btw share the OTP that just came on your phone"
     r = client.post("/shield/conversation", json={"transcript": chat, "me": "Karan"}).get_json()
     assert r["fused"]["escalate_cert_army"]
+
+
+# ----------------------------------------------------------------- pasted chats (user-reported false positive)
+USER_SMALLTALK = open(os.path.join(SAMPLE_CHATS, "09_benign_unnamed_paste_with_times.txt"), encoding="utf-8").read() \
+    if os.path.exists(os.path.join(SAMPLE_CHATS, "09_benign_unnamed_paste_with_times.txt")) else ""
+
+
+def test_parser_reads_time_lines_and_infers_speakers():
+    from transcript import parse_transcript, to_conversation
+    p = parse_transcript(USER_SMALLTALK)
+    assert len(p["messages"]) == 12 and p["speakers_inferred"]           # time lines are not messages
+    assert {s["name"] for s in p["senders"]} == {"Person 1", "Person 2"}
+    # each time line stamps the message above it; the last message has no time line after it
+    assert all(isinstance(m["ts"], float) for m in p["messages"][:-1]) and p["messages"][-1]["ts"] is None
+    q = parse_transcript("Them: Coming tonight?\nMe: Yes\nThem: Great")
+    assert q["suggested_me"] == "Me" and [t["role"] for t in to_conversation(q["messages"], "")] == ["contact", "user", "contact"]
+
+
+@pytest.mark.parametrize("me", ["", "Person 1", "Person 2"])
+def test_user_reported_smalltalk_is_benign_in_chat_tab(client, me):
+    r = client.post("/shield/conversation", json={"transcript": USER_SMALLTALK, "me": me}).get_json()
+    assert r["fused"]["final_risk_score"] < 40 and r["fused"]["category_id"] == 0
+
+
+def test_user_reported_smalltalk_is_benign_in_message_tab(client):
+    r = client.post("/predict", data={"message": USER_SMALLTALK}).get_json()
+    assert r["analysed_as_conversation"] and r["final_risk_score"] < 40
+
+
+def test_multiline_phishing_sms_still_escalates_when_routed_as_chat(client):
+    sms = "Dear customer,\nYour SBI KYC is pending.\nUpdate now at sbi-kyc-update.online and enter OTP\nRegards"
+    assert client.post("/predict", data={"message": sms}).get_json()["escalate_cert_army"]
+
+
+@pytest.mark.parametrize("cid, transcript, me, expect", _conv_cases("eval_conversations_2.json") + _conv_cases("eval_conversations_3.json"))
+def test_conversation_sets_2_and_3(client, cid, transcript, me, expect):
+    s = client.post("/shield/conversation", json={"transcript": transcript, "me": me}).get_json()["fused"]["final_risk_score"]
+    got = "high" if s >= 80 else "medium" if s >= 40 else "low"
+    assert got == expect, (cid, s)

@@ -134,6 +134,46 @@ def featurize(turns, zt_score, syn_score):
     return np.array(f, dtype=float)
 
 
+# Features along which risk may only go UP (+1) or DOWN (-1); 0 = unconstrained.
+# Without these, trees trained on synthetic chats learned brittle rules such as
+# "casual-looking chat, so ignore the probing after a refusal".
+MONOTONE_UP = {"r_max", "r_top2", "r_frac40", "r_frac80", "r_n80", "r_late_max", "cat_max_1", "cat_max_2", "cat_max_3",
+               "cat_max_4", "cat_max_5", "tier_mean_high", "tier_max_high", "stage_max", "intent_max", "info_req_frac",
+               "secrecy_n", "ev_secret_ask", "ev_payload", "ev_cred_lure", "ev_extortion", "probe_after_refusal",
+               "probe_after_refusal_flag", "zt_score"}
+MONOTONE_DOWN = {"tier_mean_low", "cat_mean_0"}
+
+
+def monotone_constraints():
+    return [1 if n in MONOTONE_UP else -1 if n in MONOTONE_DOWN else 0 for n in FEATURE_NAMES]
+
+
+class OrdinalMonotoneClassifier:
+    """LOW < MEDIUM < HIGH as two monotone-constrained binary boosters: P(>=MEDIUM), P(HIGH).
+
+    (sklearn only supports monotonic constraints for binary targets, and the ordinal split
+    also respects that HIGH implies at least MEDIUM.)
+    """
+
+    def __init__(self, **params):
+        self.params = params
+
+    def fit(self, X, y):
+        from sklearn.ensemble import HistGradientBoostingClassifier
+        cst = monotone_constraints()
+        self.ge1 = HistGradientBoostingClassifier(monotonic_cst=cst, **self.params).fit(X, (y >= 1).astype(int))
+        self.ge2 = HistGradientBoostingClassifier(monotonic_cst=cst, **self.params).fit(X, (y >= 2).astype(int))
+        return self
+
+    def predict_proba(self, X):
+        p1 = self.ge1.predict_proba(X)[:, 1]
+        p2 = np.minimum(self.ge2.predict_proba(X)[:, 1], p1)
+        return np.column_stack([1 - p1, p1 - p2, p2])
+
+    def predict(self, X):
+        return self.predict_proba(X).argmax(1)
+
+
 class ConversationModel:
     def __init__(self, path=MODEL_PATH):
         self.clf, self.info = None, {}

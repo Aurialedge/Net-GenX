@@ -63,6 +63,22 @@ P = {
              "Weapon cleaning after lunch", "Conference at 1500 hrs in the CO's office", "Kit inspection tomorrow morning",
              "Reminder: never share OTP or service details on WhatsApp", "Blood donation camp at MH on Friday"],
     "unit_reply": ["Roger sir", "Noted sir", "Will do", "Copied", "Yes sir", "Done sir", "Ji sahab"],
+    "casual": ["Hey! How was your day?", "Pretty good, just finished some work. You?", "Busy day at the office today",
+               "Haha, weekdays are always busy", "Any plans for the weekend?", "Thinking of watching a movie with friends",
+               "Have you seen the new movie everyone's talking about?", "Not yet, heard good reviews though", "You should watch it",
+               "I'll add it to my watchlist", "Anyway, take care. Talk later!", "You too, have a great evening",
+               "Did you finish the assignment?", "Almost, stuck on the last part", "Let's study together tomorrow",
+               "How's the new job going?", "Traffic was terrible today", "I'm so tired, going to sleep early",
+               "Lunch was amazing today", "Weather is so nice this evening", "What are you up to?", "Nothing much, just chilling",
+               "Long day, finally home", "Did you eat?", "Yes, just had dinner", "The match was crazy yesterday",
+               "Good morning! Have a nice day", "Thanks, you too", "Call me when you're free", "Sure, will call in a bit",
+               "Happy weekend!", "Same here, what about you?", "Sounds good!", "Haha true", "Okay see you then",
+               "How was the exam?", "It went well, thanks for asking", "Can you send me the notes?", "Sending now"],
+    "catchup": ["So long! Where are you these days?", "Still in the same city?", "Moved to Bangalore last year",
+                "How's the family?", "Everyone is good, thanks", "We should meet when I visit next month",
+                "Are you still working at the same company?", "Got married last year!", "Congrats! Send pics of the wedding",
+                "Remember our college days?", "Miss those days yaar", "Let's plan a reunion", "Where do you live now?",
+                "Still in Pune, same old place", "Kya chal raha hai aajkal?", "Kaafi time ho gaya baat kiye"],
     "service": ["Your order is out for delivery", "Your SBI account is credited with salary Rs 68,450", "OTP for login is 482913. Do not share it with anyone",
                 "Rs 1,250 debited for UPI/swiggy", "Your recharge of Rs 299 is successful", "Electricity bill of Rs 1,830 paid successfully",
                 "Your IRCTC ticket is confirmed, PNR 4521", "Your pension for November has been credited"],
@@ -76,7 +92,8 @@ T = {
     "rapport": ["You seem very genuine, not like others", "I really admire people who serve the nation", "You have such a kind smile",
                 "Talking to you makes my day", "I feel like I've known you for years", "Wow, so brave! My papa wanted to join the army too",
                 "Tum bahut achhe ho", "You're so different from other guys", "I love men in uniform 😍", "आप बहुत अच्छे लगते हो",
-                "I work as a nurse, it's tiring but I love it", "I also like trekking and old songs"],
+                "I work as a nurse, it's tiring but I love it", "I also like trekking and old songs",
+                "आप बहुत हैंडसम हो", "मुझे फौजी बहुत पसंद हैं", "आपसे बात करके बहुत अच्छा लगता है", "तुम्हारी बहुत याद आती है"],
     "trust": ["Please don't tell anyone about our chats, it's our secret 🤫", "Let's move to Telegram, WhatsApp isn't safe",
               "Delete our chats after reading ok?", "You're the only one I trust", "My family is very strict, keep this between us",
               "I'm going through a hard time, only you understand me", "Kisi ko mat batana hamari baatein", "Let's talk on Signal instead"],
@@ -85,7 +102,15 @@ T = {
                "Which radars or missiles does your sector have?", "Send a pic of you in uniform please", "Share your live location na",
                "Do a video call from your camp, show me around", "Tumhari unit kab move kar rahi hai?", "Convoy kitne baje niklega?",
                "Post pe kitne jawan hai?", "आपकी यूनिट अभी कहाँ तैनात है?", "Which formation are you with now?",
-               "What does your duty schedule look like this week?", "Send me a photo of your bunker"],
+               "What does your duty schedule look like this week?", "Send me a photo of your bunker",
+               "अपनी लाइव लोकेशन भेजो", "आपकी पोस्ट पर कितने जवान हैं?", "अपनी वर्दी वाली फोटो भेजो ना", "यूनिट कब शिफ्ट हो रही है?",
+               "बताओ ना अभी किस पोस्ट पर हो?"],
+    # individually mild questions; asked one after another after a refusal they ARE elicitation
+    "elicit_soft": ["Which city are you in nowadays?", "Do you stay inside the cantonment?", "Is your place far from the border?",
+                    "How long will you be at this posting?", "What's the daily routine like there?", "Are you moving somewhere soon?",
+                    "Do you get to use your phone at the post?", "Is it a field area or a peace station?", "Kaunse sheher mein ho abhi?",
+                    "Wahan kitne din rukoge?", "Camp border ke paas hai kya?", "आप अभी किस शहर में हो?", "वहाँ कितने दिन रहोगे?",
+                    "What time do you usually go out?", "Do you live with your unit or outside?"],
     "persist": ["Arre I won't tell anyone, just tell me", "Only for me na, please", "It's just general knowledge, no harm",
                 "Why are you hiding things from me?", "If you trust me you'll tell me", "Bata na yaar, kisi ko nahi bataungi",
                 "Only approximate figures, it will stay anonymous", "Others told me, why can't you?"],
@@ -175,24 +200,27 @@ def _honeytrap(rng, persist):
 
 SCENARIOS = {
     # ---------------- LOW
-    "family": (0, 0, lambda r: [(("c", "fam") if i % 2 == 0 else ("u", "fam_reply")) for i in range(r.randint(3, 10))]),
-    "spouse": (0, 0, lambda r: [(("c", "spouse") if i % 2 == 0 else ("u", "spouse_reply")) for i in range(r.randint(3, 10))]),
-    "friends": (0, 0, lambda r: [(("c", "friend") if i % 2 == 0 else ("u", "friend_reply")) for i in range(r.randint(3, 9))]),
-    "unit_group": (0, 0, lambda r: [(("c", "unit") if i % 2 == 0 else ("u", "unit_reply")) for i in range(r.randint(3, 10))]),
+    "family": (0, 0, lambda r: [(("c", r.choice(["fam", "fam", "casual"])) if i % 2 == 0 else ("u", "fam_reply")) for i in range(r.randint(3, 18))]),
+    "spouse": (0, 0, lambda r: [(("c", r.choice(["spouse", "spouse", "casual"])) if i % 2 == 0 else ("u", "spouse_reply")) for i in range(r.randint(3, 18))]),
+    "friends": (0, 0, lambda r: [(("c", r.choice(["friend", "casual"])) if i % 2 == 0 else ("u", r.choice(["friend_reply", "casual"]))) for i in range(r.randint(3, 18))]),
+    "casual_chat": (0, 0, lambda r: [(("c", "casual") if i % 2 == 0 else ("u", "casual")) for i in range(r.randint(4, 24))]),
+    "catchup": (0, 0, lambda r: [(("c", r.choice(["catchup", "casual"])) if i % 2 == 0 else ("u", r.choice(["catchup", "casual"]))) for i in range(r.randint(4, 14))]),
+    "unit_group": (0, 0, lambda r: [(("c", "unit") if i % 2 == 0 else ("u", "unit_reply")) for i in range(r.randint(3, 16))]),
     "service_sms": (0, 0, lambda r: [("c", "service")] * r.randint(2, 6)),
     # ---------------- MEDIUM
     "friendly_stranger": (1, 1, lambda r: [("c", "open"), ("u", "neutral")] + [("c", "small"), ("u", "neutral")] * r.randint(1, 3)
                           + [("c", "rapport")] * r.randint(0, 1)),
     "spam_thread": (1, 2, lambda r: [("c", "spam")] * r.randint(2, 4) + [("u", "neutral")] * r.randint(0, 1)),
-    "one_question_dropped": (1, 5, lambda r: [("c", "open"), ("u", "neutral"), ("c", "elicit"), ("u", "refuse")]
-                             + [("c", "small"), ("u", "neutral")] * r.randint(1, 3)),
+    "one_question_dropped": (1, 5, lambda r: [("c", "open"), ("u", "neutral"), ("c", r.choice(["elicit", "elicit_soft"])),
+                                              ("u", "refuse")] + [("c", "small"), ("u", "neutral")] * r.randint(1, 3)),
     "vague_pressure": (1, 4, lambda r: [("c", "pressure"), ("u", "neutral")] * r.randint(1, 3)),
     "group_with_spam": (1, 2, lambda r: [("c", "unit"), ("u", "unit_reply")] * r.randint(1, 3) + [("s", "spam")]
                         + [("c", "unit")] * r.randint(0, 2)),
     # ---------------- HIGH
     "honeytrap": (2, 1, lambda r: _honeytrap(r, persist=r.random() < 0.5)),
-    "slow_elicitation": (2, 5, lambda r: [("c", "open"), ("u", "neutral"), ("c", "small"), ("u", "neutral"), ("c", "elicit"),
-                                          ("u", "refuse")] + [("c", "elicit")] * r.randint(2, 4)),
+    "slow_elicitation": (2, 5, lambda r: [("c", "open"), ("u", "neutral"), ("c", "small"), ("u", "neutral"),
+                                          ("c", r.choice(["elicit", "elicit_soft"])), ("u", "refuse")]
+                         + [("c", r.choice(["elicit_soft", "elicit_soft", "elicit"])) for _ in range(r.randint(2, 5))]),
     "sextortion": (2, 4, lambda r: [("c", "open"), ("u", "neutral"), ("c", "rapport"), ("c", "exploit_honey"), ("u", "neutral"),
                                     ("c", "exploit_black"), ("u", "scared"), ("c", "exploit_black")]),
     "impersonation_otp": (2, 2, lambda r: [("c", "imp_open"), ("u", "neutral"), ("c", "imp_setup"), ("u", "neutral"),
@@ -208,7 +236,7 @@ SCENARIOS = {
     "late_escalation": (2, 1, lambda r: [("c", "small"), ("u", "neutral")] * r.randint(3, 6) + [("c", "rapport"), ("c", "elicit"), ("c", "elicit")]),
 }
 # share of the corpus per scenario (LOW 40% / MEDIUM 20% / HIGH 40%)
-WEIGHTS = {"family": 10, "spouse": 9, "friends": 8, "unit_group": 8, "service_sms": 5,
+WEIGHTS = {"family": 8, "spouse": 8, "friends": 7, "unit_group": 7, "service_sms": 4, "casual_chat": 9, "catchup": 4,
            "friendly_stranger": 6, "spam_thread": 4, "one_question_dropped": 5, "vague_pressure": 4, "group_with_spam": 3,
            "honeytrap": 8, "slow_elicitation": 5, "sextortion": 4, "impersonation_otp": 4, "impersonation_docs": 3,
            "fake_recruiter": 3, "malware_drop": 3, "investment_scam": 3, "journalist": 3, "late_escalation": 4}
@@ -238,13 +266,15 @@ def _render(rng, scenario):
                 text += rng.choice([" ", ". ", "! "]) + _pick(rng, pool)
             sender = contact if who == "c" else rng.choice(["+91 99XXXXXX01", "+91 87XXXXXX33", "Unknown"])
         else:
-            text = _pick(rng, REPLY.get(kind) or P[kind])
+            text = _pick(rng, REPLY.get(kind) or P.get(kind) or T[kind])
             sender = me
         msgs.append({"sender": sender, "text": _perturb(text, rng), "ts": ts})
     if scenario in ("unit_group", "group_with_spam"):  # group chats: several senders
         for m in msgs:
             if m["sender"] == contact and rng.random() < 0.5:
                 m["sender"] = rng.choice(["Sub Maj Rawat", "Adjt", "Hav Singh", "Nk Verma"])
+    if rng.random() < 0.25:
+        me = ""
     return {"messages": msgs, "me": me, "tier": tier, "category": cat, "scenario": scenario}
 
 

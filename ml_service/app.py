@@ -14,6 +14,7 @@ Endpoints
   GET  /threat_intel           advisories
 """
 import os
+import re
 import sys
 import time
 import traceback
@@ -202,6 +203,18 @@ def predict():
         return jsonify({"status": False, "error": "Provide 'message' text or a file upload."}), 400
     print(f"[AI-ENGINE] Analyzing text transmission: {text[:80]!r}")
     level1 = detector.analyze_text(text)
+    if shield is not None and _pasted_chat(text):
+        # a pasted conversation: judge it as a conversation; the whole-text verdict is kept as a
+        # floor only when it alone is an escalation (e.g. a multi-line phishing SMS)
+        payload, code = _conversation_report({"transcript": text, "me": ""})
+        if code == 200:
+            out = payload["fused"]
+            out["counter_intel"] = payload["counter_intel"]
+            out["analysed_as_conversation"] = True
+            if level1["final_risk_score"] >= ESCALATION_THRESHOLD and level1["final_risk_score"] > out["final_risk_score"]:
+                out.update({k: level1[k] for k in ("final_risk_score", "threat_level", "category_id", "final_prediction",
+                                                   "threat_type", "mitigation_steps", "escalate_cert_army")})
+            return jsonify(out), 200
     ci = _run_shield(shield.analyze_message, text, level1=level1, **ctx) if shield else None
     return jsonify(_fuse(level1, ci)), 200
 
@@ -220,7 +233,12 @@ def shield_analyze():
 
 @app.route("/shield/conversation", methods=["POST"])
 def shield_conversation():
-    data = request.get_json(silent=True) or {}
+    payload, code = _conversation_report(request.get_json(silent=True) or {})
+    return jsonify(payload), code
+
+
+def _conversation_report(data):
+    """Full 5-layer + learned-model analysis of a chat. Returns (payload, http_status)."""
     msgs = data.get("messages")
     if not msgs and isinstance(data.get("transcript"), str):
         # raw chat export + the reporter's own name -> {text, role} turns
@@ -230,17 +248,17 @@ def shield_conversation():
             others = [s["name"] for s in parsed["senders"] if s["name"].lower() != str(data.get("me", "")).lower()]
             data["sender"] = others[0] if others and others[0] != "Unknown" else None
     if not isinstance(msgs, list) or not msgs:
-        return jsonify({"status": False, "error": "'messages' must be a non-empty list of {text, role}"}), 400
+        return {"status": False, "error": "'messages' must be a non-empty list of {text, role}"}, 400
     if len(msgs) > 200:
-        return jsonify({"status": False, "error": "max 200 messages per transcript"}), 413
+        return {"status": False, "error": "max 200 messages per transcript"}, 413
     msgs = [m if isinstance(m, dict) else {"text": str(m)} for m in msgs]
     if shield is None:
-        return jsonify({"status": False, "error": "Counter-Intelligence Shield offline"}), 503
+        return {"status": False, "error": "Counter-Intelligence Shield offline"}, 503
     res = shield.analyze_conversation(msgs, channel=data.get("channel"), sender=data.get("sender"),
                                       sender_domain=data.get("sender_domain"),
                                       verified_contact=bool(data.get("verified_contact")))
     if res.get("status") is False:
-        return jsonify(res), 400
+        return res, 400
     level1 = res.pop("level1_peak")
     fused = _fuse(level1, res)
     cm = res.get("conversation_model")
@@ -262,7 +280,20 @@ def shield_conversation():
                             f"HIGH {cm['tier_probabilities']['HIGH']:.0%}). Most dangerous message: "
                             f"{level1['final_prediction']} ({level1['final_risk_score']}). "
                             f"Counter-Intel Shield verdict: {res['verdict']} ({res['counter_intel_score']}%).")
-    return jsonify({"status": True, "counter_intel": res, "fused": fused}), 200
+    return {"status": True, "counter_intel": res, "fused": fused}, 200
+
+
+_EMAIL_HEADER = re.compile(r"^\s*(?:subject|from|to|cc|date)\s*:", re.I | re.M)
+
+
+def _pasted_chat(text):
+    """True when free text is really a multi-message chat (the single-message model is the wrong tool)."""
+    if _EMAIL_HEADER.search(text) or any(len(ln) > 400 for ln in text.splitlines()):
+        return False
+    try:
+        return len(parse_transcript(text)["messages"]) >= 4
+    except Exception:
+        return False
 
 
 @app.route("/shield/transcript/parse", methods=["POST"])

@@ -16,6 +16,7 @@ Counter-Intelligence Shield over a whole conversation instead of one message.
 | `06_hinglish_opsec_whatsapp.txt` | WhatsApp (Android), Hinglish | Deepak | **Escalated** | "Friend" asks about unit move, convoy timing, troop count; keeps asking after "nahi bata sakta" |
 | `07_benign_family_whatsapp_iphone.txt` | WhatsApp (iPhone) | Rahul | **Low risk** | Ordinary family chat (Hinglish) |
 | `08_benign_unit_group_whatsapp.txt` | WhatsApp (Android), group | Nk Sharma | **Low risk** | Unit group chat full of military words (PT, lecture, sports day) but no threat |
+| `09_benign_unnamed_paste_with_times.txt` | Copy-paste, no names, time on its own line | Not in this chat (or Person 1/2) | **Low risk** | Everyday small talk pasted without sender names; time lines are read as timestamps, speakers assumed to alternate |
 
 The files reproduce real export details (WhatsApp's invisible characters, system notices,
 `<Media omitted>`, multi-line messages, Telegram's rich-text arrays), so they also test the parser.

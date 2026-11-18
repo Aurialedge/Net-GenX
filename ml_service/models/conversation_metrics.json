@@ -1,15 +1,15 @@
 {
-  "version": "1.0.0",
-  "trained_at": "2026-11-18T16:00:20.982860+00:00",
+  "version": "2.0.0",
+  "trained_at": "2026-11-18T16:25:24.555117+00:00",
   "sklearn_version": "1.6.1",
   "n_train": 10000,
-  "n_messages": 68214,
+  "n_messages": 87528,
   "tier_counts": {
-    "low": 3962,
-    "medium": 2065,
-    "high": 3973
+    "low": 4345,
+    "medium": 1997,
+    "high": 3658
   },
-  "algorithm": "HistGradientBoostingClassifier on 52 features from the Level-1 model and shield layers 1/3/4/5",
+  "algorithm": "ordinal monotone-constrained HistGradientBoosting (P>=MEDIUM, P(HIGH)) on 52 features from the Level-1 model and shield layers 1/3/4/5",
   "features": [
     "n_contact_log",
     "user_ratio",
@@ -66,48 +66,50 @@
   ],
   "synthetic_holdout": {
     "n_test": 2000,
-    "tier_accuracy": 0.9975,
-    "tier_macro_f1": 0.9969,
-    "band_accuracy_from_score": 0.996,
+    "tier_accuracy": 0.988,
+    "tier_macro_f1": 0.986,
+    "band_accuracy_from_score": 0.986,
     "confusion(rows=true low/med/high)": [
       [
-        792,
-        1,
-        0
-      ],
-      [
+        860,
         7,
-        407,
-        0
+        2
       ],
       [
-        0,
-        0,
-        793
+        14,
+        382,
+        3
+      ],
+      [
+        1,
+        1,
+        730
       ]
     ],
     "per_scenario_band_accuracy": {
+      "casual_chat": 1.0,
+      "catchup": 0.947,
       "fake_recruiter": 1.0,
       "family": 1.0,
-      "friendly_stranger": 0.974,
-      "friends": 1.0,
-      "group_with_spam": 1.0,
+      "friendly_stranger": 0.925,
+      "friends": 0.992,
+      "group_with_spam": 0.904,
       "honeytrap": 1.0,
       "impersonation_docs": 1.0,
       "impersonation_otp": 1.0,
       "investment_scam": 1.0,
       "journalist": 1.0,
-      "late_escalation": 1.0,
+      "late_escalation": 0.975,
       "malware_drop": 1.0,
-      "one_question_dropped": 0.989,
-      "service_sms": 1.0,
+      "one_question_dropped": 0.978,
+      "service_sms": 0.985,
       "sextortion": 1.0,
       "slow_elicitation": 1.0,
-      "spam_thread": 1.0,
-      "spouse": 0.994,
+      "spam_thread": 0.986,
+      "spouse": 0.979,
       "unit_group": 1.0,
-      "vague_pressure": 0.959
+      "vague_pressure": 0.987
     }
   },
-  "training_seconds": 28.9
+  "training_seconds": 34.1
 }

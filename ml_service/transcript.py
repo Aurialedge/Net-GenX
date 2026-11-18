@@ -34,6 +34,15 @@ _SYSTEM = re.compile(
 _MEDIA = re.compile(r"^<?(?:Media omitted|image omitted|video omitted|audio omitted|sticker omitted|"
                     r"GIF omitted|document omitted|attached: .*)>?$", re.I)
 
+# Copy-pasted chats (Instagram, SMS, many apps) put the time / date on its own line.
+_CLOCK_LINE = re.compile(r"^\[?\s*(?:(?:today|yesterday|mon|tue|wed|thu|fri|sat|sun)\w*,?\s+)?"
+                         r"(\d{1,2})[:.](\d{2})(?:[:.]\d{2})?\s*([ap])?\.?\s*m?\.?\s*\]?\s*(?:✓✓?|seen|read|delivered|sent)?$", re.I)
+_DATE_LINE = re.compile(r"^(?:today|yesterday|(?:mon|tues|wednes|thurs|fri|satur|sun)day"
+                        r"|\d{1,2}(?:st|nd|rd|th)?\s+[a-z]{3,9},?(?:\s+\d{4})?|[a-z]{3,9}\s+\d{1,2}(?:st|nd|rd|th)?,?(?:\s+\d{4})?"
+                        r"|\d{1,2}[./-]\d{1,2}[./-]\d{2,4})$", re.I)
+# sender labels that mean "the person reporting this chat"
+ME_LABELS = {"me", "you", "myself", "main", "self", "reporter"}
+
 SENDER_KEYS = ("sender", "from", "name", "author", "role", "user")
 TEXT_KEYS = ("text", "message", "content", "body", "msg")
 
@@ -83,6 +92,14 @@ def _parse_lines(raw):
     for line in raw.splitlines():
         line = _clean(line)
         if not line:
+            continue
+        ck = _CLOCK_LINE.match(line)
+        if ck:  # "6:30 PM" on its own line: the time of the message above, not a message
+            if msgs and msgs[-1] is not None and msgs[-1]["ts"] is None:
+                h = int(ck.group(1)) % 12 + (12 if (ck.group(3) or "").lower() == "p" else 0) if ck.group(3) else int(ck.group(1))
+                msgs[-1]["ts"] = f"clock:{h * 3600 + int(ck.group(2)) * 60}"
+            continue
+        if _DATE_LINE.match(line):  # "Today", "Monday", "12 Nov 2026" separators
             continue
         m = _WA_IOS.match(line) or _WA_ANDROID.match(line)
         if m:
@@ -151,22 +168,41 @@ def parse_transcript(raw):
         fmt, msgs = "csv", _try_csv(raw)
     if msgs is None:
         msgs = _parse_lines(raw)
-        fmt = "whatsapp" if any(m["ts"] for m in msgs) else "lines"
+        fmt = "whatsapp" if any(m["ts"] and not str(m["ts"]).startswith("clock:") for m in msgs) else "lines"
     msgs = [m for m in msgs if m["text"] and not _MEDIA.match(m["text"]) and not _SYSTEM.search(m["text"])]
     order = _date_order([m["ts"] for m in msgs if isinstance(m.get("ts"), str) and re.match(r"\d", m["ts"])])
+    day, last = datetime(2026, 1, 1).timestamp(), None
     for m in msgs:
-        m["ts"] = _to_epoch(m.get("ts"), order)
+        ts = m.get("ts")
+        if isinstance(ts, str) and ts.startswith("clock:"):  # time-of-day only: keep order, roll over midnight
+            sec = float(ts[6:])
+            if last is not None and day + sec < last:
+                day += 86400
+            m["ts"] = last = day + sec
+        else:
+            m["ts"] = _to_epoch(ts, order)
+    # unnamed paste: every line came from "Unknown". Chats alternate speakers far more often
+    # than not, so label turns Person 1 / Person 2 and let the reporter pick (UI says so).
+    speakers_inferred = False
+    if fmt == "lines" and len(msgs) >= 2 and all(m["sender"] == "Unknown" for m in msgs):
+        for i, m in enumerate(msgs):
+            m["sender"] = "Person 1" if i % 2 == 0 else "Person 2"
+        speakers_inferred = True
     truncated = max(0, len(msgs) - MAX_MESSAGES)
     msgs = msgs[-MAX_MESSAGES:]
     counts = {}
     for m in msgs:
         counts[m["sender"]] = counts.get(m["sender"], 0) + 1
     senders = [{"name": n, "count": c} for n, c in sorted(counts.items(), key=lambda kv: -kv[1])]
-    return {"messages": msgs, "senders": senders, "format": fmt, "truncated": truncated}
+    suggested_me = next((n for n in counts if n.strip().lower() in ME_LABELS), None)
+    return {"messages": msgs, "senders": senders, "format": fmt, "truncated": truncated,
+            "speakers_inferred": speakers_inferred, "suggested_me": suggested_me}
 
 
 def to_conversation(messages, me):
     """Map parsed messages to the shield's {text, role} turns; ``me`` is the reporter's own name."""
     me_n = (me or "").strip().lower()
+    if not me_n:  # "Me:" / "You:" labels identify the reporter even if they did not pick one
+        me_n = next((m["sender"].strip().lower() for m in messages if m["sender"].strip().lower() in ME_LABELS), "")
     return [{"text": m["text"], "role": "user" if me_n and m["sender"].strip().lower() == me_n else "contact",
              "ts": m.get("ts")} for m in messages]

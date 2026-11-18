@@ -192,7 +192,7 @@ export default function MessageClassifier() {
       setChatParsed(data);
       const mine = [user?.name, user?.email?.split('@')[0]].filter(Boolean).map(s => s.toLowerCase());
       const guess = data.senders.find(s => mine.some(m => s.name.toLowerCase().includes(m) || m.includes(s.name.toLowerCase())));
-      setChatMe(guess ? guess.name : '');
+      setChatMe(data.suggested_me || (guess ? guess.name : ''));
     } catch (err) {
       setChatParsed(null);
       setChatError(`Could not read this chat: ${err.message}`);
@@ -654,6 +654,12 @@ export default function MessageClassifier() {
                     Read <b>{chatParsed.messages.length}</b> messages ({chatParsed.format})
                     {chatParsed.truncated > 0 && <> — only the most recent {chatParsed.messages.length} are analysed ({chatParsed.truncated} older ones skipped)</>}.
                   </p>
+                  {chatParsed.speakers_inferred && (
+                    <p className="text-[11px] text-amber-300">
+                      This paste has no sender names, so messages were assumed to alternate between two people
+                      (Person 1 starts). Pick which one is you, or "Not in this chat".
+                    </p>
+                  )}
                   <label className="text-[11px] font-mono uppercase tracking-wider text-violet-300 block">Which participant are you?</label>
                   <div className="flex flex-wrap gap-2">
                     {chatParsed.senders.map(s => (
@@ -860,6 +866,12 @@ export default function MessageClassifier() {
 
               {/* Threat Details */}
               <div className="py-4 text-sm text-slate-300 leading-relaxed font-normal">
+                {aiReport.analysed_as_conversation && (
+                  <p className="mb-2 text-xs text-violet-300 font-mono">
+                    This text looks like a pasted chat, so it was analysed as a whole conversation.
+                    For best results use the Chat History tab and pick which participant you are.
+                  </p>
+                )}
                 {aiReport.details}
               </div>
 

@@ -1,6 +1,6 @@
 {
   "model_version": "4.0.0",
-  "trained_at": "2026-11-18T14:22:10.449354+00:00",
+  "trained_at": "2026-11-18T16:21:51.982544+00:00",
   "sklearn_version": "1.6.1",
   "algorithms": {
     "features": "word 1-2gram TF-IDF + char_wb 2-5gram TF-IDF + 21 threat indicators",
@@ -8,39 +8,39 @@
     "severity_head": "multinomial LogisticRegression (LOW/MEDIUM/HIGH)",
     "risk_score": "expected severity, tier scores {'low': 5.0, 'medium': 62.0, 'high': 95.0}, plus hard-evidence floors"
   },
-  "train_size": 4641,
+  "train_size": 5351,
   "unique_dataset_texts": 211,
-  "augmentation_samples": 4430,
+  "augmentation_samples": 5140,
   "augmentation_tiers": {
-    "low": 1410,
-    "medium": 930,
-    "high": 2090
+    "low": 1820,
+    "medium": 1080,
+    "high": 2240
   },
   "selected_C": 10.0,
   "cv": {
-    "n": 4641,
-    "category_accuracy": 0.995,
-    "category_macro_f1": 0.9954,
-    "threats_flagged@40": 0.9966,
-    "benign_false_alarm@40": 0.0042,
-    "band_accuracy": 0.9879,
-    "high_escalated@80": 0.9816,
-    "non_high_wrongly_escalated@80": 0.0008,
+    "n": 5351,
+    "category_accuracy": 0.9955,
+    "category_macro_f1": 0.9957,
+    "threats_flagged@40": 0.9963,
+    "benign_false_alarm@40": 0.0027,
+    "band_accuracy": 0.9882,
+    "high_escalated@80": 0.9807,
+    "non_high_wrongly_escalated@80": 0.0003,
     "band_confusion(rows=want low/med/high)": [
       [
-        1419,
+        1830,
         4,
-        2
+        1
       ],
       [
-        8,
-        922,
+        11,
+        1069,
         0
       ],
       [
-        3,
-        39,
-        2244
+        2,
+        45,
+        2389
       ]
     ]
   },
@@ -243,24 +243,24 @@
           "category": 1,
           "band": "medium",
           "pred": 1,
-          "score": 87.2
+          "score": 90.2
         },
         {
           "text": "Hey, what does a typical day look like for you at the base? What time do you guys usually go out on patrol?",
           "category": 5,
           "band": "medium",
           "pred": 5,
-          "score": 93.0
+          "score": 94.5
         },
         {
           "text": "Which station are you posted at these days? Is it near the border?",
           "category": 5,
           "band": "medium",
           "pred": 5,
-          "score": 94.5
+          "score": 94.9
         }
       ]
     }
   },
-  "training_seconds": 64.8
+  "training_seconds": 82.4
 }

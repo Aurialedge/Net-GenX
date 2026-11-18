@@ -240,8 +240,13 @@ O_SLOTS = {
           "Which frequencies do you use on the radio net?", "Where exactly is the ammunition depot?",
           "What is the strength of {unit} now?", "Is the strike corps mobilising?",
           "What weapon systems were inducted in your unit recently?", "What are the patrol timings at the LoC post?",
-          "Where are the air defence guns positioned?"],
-    "casual": ["Just curious.", "No big deal, just asking.", "I won't tell anyone.", "It's only for general knowledge."],
+          "Where are the air defence guns positioned?", "When do your troops rotate to the field posts?",
+          "When is the next move of your battalion to the border area?", "How long until your unit shifts to the forward location?",
+          "Which date does the relief of your post take place?"],
+    "casual": ["Just curious.", "No big deal, just asking.", "I won't tell anyone.", "It's only for general knowledge.",
+               # visit pretext: a classic way to make movement questions sound harmless
+               "My cousin wants to come and see you there.", "We were planning to visit you.", "Asking so I can plan a trip.",
+               "My friend is thinking of visiting that side.", "Just wondering, no reason."],
     "genai_pre": ["That's a fascinating perspective, thank you for sharing!", "I really appreciate your insights, they're so valuable.",
                   "As someone passionate about strategic affairs, I'd love to learn from your first-hand experience."],
     "genai_q": ["Could you walk me through how your unit's equipment and positions are organised?",
@@ -724,6 +729,33 @@ def _sample_unique(rng, n, make):
     return seen
 
 
+# everyday English chit-chat lines (benign); used for pasted multi-line chats below
+CHITCHAT = ["How was your day?", "Pretty good, just got home.", "Busy day at work today.", "Weekdays are always busy haha.",
+            "Any plans for the weekend?", "Maybe a movie with friends.", "Did you watch the new movie?", "Not yet, heard it's good.",
+            "You should watch it.", "Will add it to my list.", "Take care, talk later!", "You too, good night!",
+            "Did you finish the assignment?", "Almost done.", "Let's meet at the library tomorrow.", "How's the new job?",
+            "Traffic was so bad today.", "I'm so tired.", "What are you up to?", "Nothing much, just relaxing.",
+            "Did you have dinner?", "Yes, just ate.", "Good morning!", "Have a nice day.", "Call me when free.",
+            "The match was amazing.", "Weather is lovely today.", "Sounds good!", "Haha true.", "See you tomorrow then.",
+            # reciprocal questions are the commonest benign follow-ups, not probing
+            "What about you?", "And you?", "How about you?", "You tell, what's up?", "How are things with you?",
+            "Pretty good! Just finished some work. What about you?", "All good here, how about you?",
+            "Same here. How was your weekend?", "I'm fine, how are you doing?", "Good, and you?"]
+GRADED_SPECS.append((0, 0, ["{chit} {chit}"], {"chit": CHITCHAT}))  # short chit-chat is LOW
+_CLOCKS = ["6:30 PM", "6:32 PM", "9:10 AM", "10:01 AM", "11:45 PM", "8:05 pm", "7:15 am", "Today", "Yesterday"]
+
+
+def _chat_paste(rng, lines):
+    """Render lines as a copy-pasted chat: one message per line, sometimes with time lines between."""
+    with_times = rng.random() < 0.5
+    out = []
+    for ln in lines:
+        out.append(ln)
+        if with_times:
+            out.append(rng.choice(_CLOCKS))
+    return "\n".join(out)
+
+
 def _compose(rows, rng, n_each=150):
     """Multi-sentence messages: several benign sentences, optionally hiding one threat sentence.
 
@@ -742,6 +774,15 @@ def _compose(rows, rng, n_each=150):
             bad, cat = rng.choice(pool)
             parts.insert(rng.randint(0, len(parts)), bad)
             out.append((" ".join(parts), cat, tier))
+    # pasted multi-line chats: plain chit-chat is LOW however long; one threat line decides the tier
+    for _ in range(n_each):
+        out.append((_chat_paste(rng, [rng.choice(CHITCHAT) for _ in range(rng.randint(3, 14))]), 0, 0))
+    for tier, pool in by_tier.items():
+        for _ in range(n_each):
+            lines = [rng.choice(CHITCHAT) for _ in range(rng.randint(2, 8))]
+            bad, cat = rng.choice(pool)
+            lines.insert(rng.randint(1, len(lines)), bad)
+            out.append((_chat_paste(rng, lines), cat, tier))
     return out
 
 
