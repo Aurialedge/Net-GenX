@@ -14,8 +14,9 @@ export default function ChatInterface() {
   }, [messages]);
 
   // Fetch response from Gemini
-  const getResponse = async (promptText = input) => {
-    if (!promptText.trim()) return;
+  // promptText: free-form question; incident: structured case from the last portal analysis
+  const getResponse = async (promptText = input, incident = null) => {
+    if (!incident && !promptText.trim()) return;
   
     const address = import.meta.env.VITE_IPFS_AI_URL || "localhost";
     const port = import.meta.env.VITE_IPFS_AI_PORT || "8000";
@@ -26,7 +27,7 @@ export default function ChatInterface() {
       const res = await fetch(`http://${address}:${port}/gemini`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: promptText }),
+        body: JSON.stringify(incident || { prompt: promptText }),
       });
   
       const data = await res.json(); // data.data is already an object
@@ -61,12 +62,19 @@ export default function ChatInterface() {
     const recordStr = localStorage.getItem("record");
     if (!recordStr) return;
   
-    const record = JSON.parse(recordStr);
-    const preinput = record.final_prediction;
-  
-    if (preinput) {
-      getResponse(preinput);
-      // setInput(preinput);
+    let record;
+    try { record = JSON.parse(recordStr); } catch { return; }
+
+    if (record.final_prediction) {
+      // brief Gemini on the real case (message, score, escalation), not just the category title
+      getResponse(record.final_prediction, {
+        message: record.reported_message || record.final_prediction,
+        category: record.final_prediction,
+        riskScore: record.final_risk_score,
+        threatLevel: record.threat_level,
+        evidence: record.details,
+        escalated: !!record.escalate_cert_army,
+      });
     }
   
     hasFetchedOnMount.current = true;

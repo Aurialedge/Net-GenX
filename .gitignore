@@ -39,6 +39,8 @@ storage/
 *.meta
 
 # Dynamic Runtime Alert Logs
+ml_service/state/
+ml_service/models/*.tmp
 ipfs/data/cert_army_alerts.json
 
 # Hardhat & Smart Contracts

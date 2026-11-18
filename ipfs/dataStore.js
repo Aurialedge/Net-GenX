@@ -136,3 +136,39 @@ export const DataStore = {
     return officials.find(o => o.officialId.toUpperCase() === officialId.toUpperCase());
   }
 };
+
+export async function seedMongoDefaults() {
+  try {
+    const userCount = await User.countDocuments();
+    if (userCount === 0) {
+      console.log("🌱 Seeding default Defence personnel into MongoDB...");
+      for (const u of initialUsers) {
+        await User.create({
+          name: u.name,
+          email: u.email,
+          password: u.password,
+          role: u.role
+        });
+      }
+      console.log("✅ Seeded default personnel into MongoDB collection 'users'!");
+    }
+    const officialCount = await Officials.countDocuments();
+    if (officialCount === 0) {
+      console.log("🌱 Seeding default CERT-Army command into MongoDB...");
+      for (const o of initialOfficials) {
+        await Officials.create({
+          department: o.department,
+          officialId: o.officialId,
+          password: o.password,
+          phoneNumber: o.phoneNumber,
+          phone: o.phone,
+          securityCode: o.securityCode,
+          role: o.role
+        });
+      }
+      console.log("✅ Seeded default command into MongoDB collection 'officials'!");
+    }
+  } catch (err) {
+    console.warn("Notice during MongoDB auto-seeding:", err.message);
+  }
+}

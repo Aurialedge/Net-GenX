@@ -1,0 +1,31 @@
+{
+  "threat_categories": {
+    "benign": 0,
+    "honey_trapping": 1,
+    "military_spear_phishing": 2,
+    "malicious_dropper": 3,
+    "blackmail_coercion": 4,
+    "opsec_reconnaissance": 5
+  },
+  "channels": {
+    "messaging": 0,
+    "email": 1,
+    "sms": 2,
+    "social_media": 3
+  },
+  "domains": {
+    "Administrative": 0,
+    "Base/Station": 1,
+    "Operational Unit": 2,
+    "Logistics/Canteen": 3,
+    "Personal Family Comms": 4
+  },
+  "mitigations": {
+    "benign": "None. Message represents legitimate routine personal or administrative operational communication.",
+    "blackmail_coercion": "Do not succumb to coercion or provide military documents. Disconnect and report immediately to Counter-Intelligence.",
+    "honey_trapping": "Terminate contact immediately. Do not share rank, unit, photos of post, or movement. Preserve handle & report to Unit Security Officer.",
+    "malicious_dropper": "Do not download external APKs, SCR, or double-extension files. Official military software is distributed strictly through authorized intranet.",
+    "military_spear_phishing": "Do not open unverified URLs or enter service numbers/OTP. Verify directly via official .gov.in/.nic.in portals.",
+    "opsec_reconnaissance": "Refuse disclosure of equipment, movement, or strength. Flag inquiry to Military Intelligence (MI)."
+  }
+}

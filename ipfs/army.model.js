@@ -1,11 +1,14 @@
 import mongoose from "mongoose";
 
 const ArmySchema = new mongoose.Schema({
-    department : String,
-    officialId:String,
-    password:String,
-    phoneNumber:String,
-    role:{type: String,enum:['Admin','officer','Analyst']}
-});
-const Officials = mongoose.model("Officials",ArmySchema); 
-export default Officials
+    department: { type: String, required: true },
+    officialId: { type: String, unique: true, required: true },
+    password: { type: String, required: true },
+    phoneNumber: { type: String },
+    phone: { type: String },
+    securityCode: { type: String, default: "123456" },
+    role: { type: String, default: 'CERT-Army' }
+}, { timestamps: true });
+
+const Officials = mongoose.model("Officials", ArmySchema); 
+export default Officials;

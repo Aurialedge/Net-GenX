@@ -12,10 +12,10 @@ import fs from "fs";
 import rateLimit from "express-rate-limit";
 
 import connect from "./dbconnect.js";
-import { uploadFile, getFileData } from "./main.js";
+import { uploadFile, getFileData, isValidCid } from "./main.js";
 import { DataStore } from "./dataStore.js";
 import sendMail from "./mail.js";
-import aires from "./gemini.js";
+import aires, { incidentPrompt } from "./gemini.js";
 import OTPservice from "./twilio.js";
 
 const SECRET_KEY = process.env.SECRET_KEY || "netgenx_defence_cyber_shield_secret_key_2025";
@@ -56,7 +56,7 @@ app.use(cors({
 }));
 app.use(cookieParser());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: "5mb" })); // chat-history evidence can exceed the 100kb default
 
 // Multer storage for memory buffers
 const storage = multer.memoryStorage();
@@ -198,6 +198,26 @@ app.get("/", (req, res) => {
   });
 });
 
+// Helper to determine client identity for IPFS MFS organization
+function getClientIdentifier(req) {
+  if (req.body?.clientName && typeof req.body.clientName === 'string' && req.body.clientName.trim()) {
+    return req.body.clientName.trim();
+  }
+  let token = req.cookies?.logintoken;
+  if (!token && req.headers?.authorization) {
+    token = req.headers.authorization.replace(/^Bearer\s+/, '');
+  }
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, SECRET_KEY);
+      if (decoded?.name) return decoded.name;
+      if (decoded?.email) return decoded.email.split('@')[0];
+      if (decoded?.officialId) return decoded.officialId;
+    } catch (e) {}
+  }
+  return "Defence_Personnel";
+}
+
 // File upload endpoint (IPFS Storage Group)
 app.post("/upload", upload.single("file"), async (req, res) => {
   console.log('[IPFS] Received file upload request');
@@ -206,7 +226,8 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       return res.status(400).json({ status: false, message: "No file uploaded" });
     }
 
-    const cid = await uploadFile(req.file.buffer, req.file.originalname);
+    const clientName = getClientIdentifier(req);
+    const cid = await uploadFile(req.file.buffer, req.file.originalname, clientName);
     res.json({
       message: "File uploaded successfully to IPFS network",
       cid,
@@ -214,6 +235,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       gatewayUrl: `https://ipfs.io/ipfs/${cid}`,
       status: true,
       originalName: req.file.originalname,
+      clientName,
       size: req.file.size
     });
   } catch (err) {
@@ -226,16 +248,18 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 app.post('/uploadtext', validateBody(validationSchemas.uploadText), async (req, res) => {
   try {
     const text = req.body.message || req.body.text;
+    const clientName = getClientIdentifier(req);
     const buffer = Buffer.from(text, "utf-8");
-    const cid = await uploadFile(buffer, "evidence_text.txt");
+    const cid = await uploadFile(buffer, "evidence_text.txt", clientName);
 
-    console.log("✅ Text evidence logged onto IPFS! CID:", cid);
+    console.log(`✅ Text evidence logged onto IPFS under ${clientName}! CID:`, cid);
 
     res.json({
       message: "Text uploaded successfully to IPFS network",
       cid,
       url: `http://localhost:8000/ipfs/${cid}`,
       gatewayUrl: `https://ipfs.io/ipfs/${cid}`,
+      clientName,
       status: true
     });
   } catch (err) {
@@ -247,6 +271,9 @@ app.post('/uploadtext', validateBody(validationSchemas.uploadText), async (req, 
 // IPFS Gateway Route - retrieves stored content by CID
 app.get('/ipfs/:cid', async (req, res) => {
   const { cid } = req.params;
+  if (!isValidCid(cid)) {
+    return res.status(400).json({ status: false, message: "Invalid CID format" });
+  }
   try {
     const fileBuffer = await getFileData(cid);
     if (!fileBuffer) {
@@ -300,13 +327,70 @@ app.post('/sendmail', async (req, res) => {
   }
 });
 
+// CERT-Army case handover: called by the portal when the AI risk score crosses the
+// escalation threshold. Builds a full case file (not just a score) and dispatches it.
+const CERT_ARMY_EMAIL = process.env.CERT_ARMY_EMAIL || 'cert-army.incident@nic.in';
+const clip = (v, n) => String(v ?? '').slice(0, n);
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+app.post('/escalate', async (req, res) => {
+  const b = req.body || {};
+  const score = Number(b.riskScore);
+  if (!Number.isFinite(score) || score < 0 || score > 100) {
+    return res.status(400).json({ status: false, error: 'riskScore (0-100) is required' });
+  }
+  const caseId = 'NGX-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-' + Date.now().toString(36).toUpperCase();
+  const steps = Array.isArray(b.mitigationSteps) ? b.mitigationSteps.slice(0, 8).map((s) => clip(s, 300)) : [];
+  const fields = [
+    ['Case ID', caseId],
+    ['Reported at', new Date().toISOString()],
+    ['Reported by', clip(b.reporter || 'Unknown personnel', 120)],
+    ['Risk score', `${score}/100 (${clip(b.threatLevel, 20)}) - escalation threshold ${clip(b.threshold ?? 80, 5)}`],
+    ['Threat category', clip(b.category, 120)],
+    ['Model confidence', b.confidence != null ? `${clip(b.confidence, 6)}%` : 'n/a'],
+    ['Input type', clip(b.inputType || 'message', 40)],
+    ['Evidence IPFS CID', clip(b.cid || 'not stored', 120)],
+    ['AI engine', clip(b.engine, 160)],
+    ['Counter-intel verdict', clip(b.counterIntelVerdict || 'n/a', 120)],
+  ];
+  const text = [
+    'NETGENX CASE HANDOVER TO CERT-ARMY',
+    ...fields.map(([k, v]) => `${k}: ${v}`),
+    '', 'AI analysis:', clip(b.details, 1500),
+    '', 'Reported content:', clip(b.message || '(file upload - see IPFS CID)', 4000),
+    '', 'Immediate actions advised to the reporter:', ...steps.map((s, i) => `${i + 1}. ${s}`),
+  ].join('\n');
+  // reported content is attacker-written: escape everything that goes into the HTML mail
+  const html = `<div style="font-family:monospace;background:#0f172a;color:#e2e8f0;padding:20px;border-radius:8px">
+    <h2 style="color:#ef4444;border-bottom:2px solid #ef4444;padding-bottom:8px">NETGENX CASE HANDOVER - ${escapeHtml(caseId)}</h2>
+    <table style="border-collapse:collapse">${fields.map(([k, v]) =>
+      `<tr><td style="padding:3px 12px 3px 0;color:#94a3b8">${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`).join('')}</table>
+    <h3>AI analysis</h3><p>${escapeHtml(clip(b.details, 1500))}</p>
+    <h3>Reported content</h3><pre style="white-space:pre-wrap;background:#1e293b;padding:12px;border-left:4px solid #ef4444">${escapeHtml(clip(b.message || '(file upload - see IPFS CID)', 4000))}</pre>
+    <h3>Immediate actions advised to the reporter</h3><ol>${steps.map((s) => `<li>${escapeHtml(s)}</li>`).join('')}</ol></div>`;
+  const subject = `Case ${caseId}: ${clip(b.category || 'Cyber threat', 80)} (risk ${score})`;
+
+  console.log(`[DEFENCE ESCALATION] ${caseId} risk=${score} category=${clip(b.category, 60)}`);
+  try {
+    const r = await sendMail(CERT_ARMY_EMAIL, subject, text, html);
+    res.json({ status: true, caseId, emailed: !r?.fallback, queued: true, alertId: r?.alertRecord?.id });
+  } catch (err) {
+    console.error('Escalation route error:', err);
+    res.status(500).json({ status: false, caseId, error: 'Could not record the CERT-Army case' });
+  }
+});
+
 // Gemini AI Guidance Endpoint
+//   { prompt }                                   free-form (chat terminal)
+//   { message, category, riskScore, threatLevel } below-threshold incident from the portal
 app.post('/gemini', async (req, res) => {
   try {
-    const prompt = req.body.prompt || req.body.message || "";
+    const b = req.body || {};
+    const prompt = b.category ? incidentPrompt(b) : (b.prompt || b.message || "");
     console.log('[AI GUIDANCE] Requesting incident mitigation steps for:', prompt.slice(0, 60));
     const response = await aires(prompt);
-    res.json({ status: true, data: response.steps, riskScore: 92 });
+    const riskScore = Number.isFinite(Number(b.riskScore)) && b.riskScore !== '' && b.riskScore != null ? Number(b.riskScore) : null;
+    res.json({ status: true, data: response.steps, source: response.source, model: response.model || null, riskScore });
   } catch (err) {
     console.error("Gemini route error:", err);
     res.status(500).json({ status: false, error: 'Server error generating mitigation guidance' });

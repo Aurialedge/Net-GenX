@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Shield, AlertTriangle, FileText, CheckCircle2, Lock, ExternalLink, ArrowRight, 
   LogOut, Terminal, Activity, Radio, Database, Cpu, UploadCloud, RefreshCw,
-  Sparkles, Check, Copy, Flame, Eye, CornerDownRight
+  Sparkles, Check, Copy, Flame, Eye, CornerDownRight, MessagesSquare
 } from 'lucide-react';
+import CounterIntelPanel from './CounterIntelPanel';
 import uploadtoipfs from './Hooks/ipfs';
 import { userStore } from "./store";
 import imgleft from '../../../public/imgleft.png';
@@ -25,6 +26,15 @@ export default function MessageClassifier() {
   const [aiReport, setAiReport] = useState(null);
   const [riskColor, setRiskColor] = useState("");
   const [mailRes, setMailRes] = useState("");
+  // where the shown mitigation steps came from: "", "loading", "gemini", "rules", "model"
+  const [mitigationSource, setMitigationSource] = useState("");
+  // Chat-history (multi-turn) analysis
+  const [chatText, setChatText] = useState("");
+  const [chatFileName, setChatFileName] = useState("");
+  const [chatParsed, setChatParsed] = useState(null); // {senders, messages, format, truncated}
+  const [chatMe, setChatMe] = useState("");
+  const [chatError, setChatError] = useState("");
+  const [isChatLoading, setIsChatLoading] = useState(false);
   const [chatVisible, setChatVisible] = useState(false);
   const [chatCountdown, setChatCountdown] = useState(8);
 
@@ -68,31 +78,181 @@ export default function MessageClassifier() {
     }
   };
 
-  // Send Alert Mail to CERT-Army
-  const sendMailAlert = async (text, threatType) => {
+  // Above threshold: hand the full case over to CERT-Army
+  const escalateToCert = async (report, text, contentCid, inputType) => {
     try {
-      const backend = `http://${ipfsAddress}:${ipfsPort}/sendmail`;
-      const res = await fetch(backend, {
+      const res = await fetch(`http://${ipfsAddress}:${ipfsPort}/escalate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          to: 'cert-army.incident@nic.in',
-          subject: `DEFENCE CYBER ALERT: ${threatType} Detected`,
-          text: `NetGenX Cyber Shield Priority Incident:\n${text}\nImmediate tactical mitigation protocols activated.`
+          reporter: [user?.name, user?.email].filter(Boolean).join(' / ') || 'Defence personnel',
+          riskScore: report.final_risk_score,
+          threatLevel: report.threat_level,
+          threshold: report.escalation_threshold,
+          category: report.final_prediction,
+          confidence: report.final_confidence,
+          details: report.details,
+          engine: report.analysis_engine,
+          counterIntelVerdict: report.counter_intel?.verdict,
+          mitigationSteps: report.mitigation_steps,
+          message: text,
+          cid: contentCid,
+          inputType,
         })
       });
       const data = await res.json();
-      if (data.status) {
-        setMailRes("High severity threat identified! Instant automated escalation dispatched to CERT-Army Incident Command.");
-        setChatVisible(true);
-        setChatCountdown(8);
-      }
+      if (!data.status) throw new Error(data.error || `HTTP ${res.status}`);
+      setMailRes(`High severity threat (risk ${report.final_risk_score}). Case ${data.caseId} handed over to CERT-Army Incident Command`
+        + (data.emailed ? ' by email.' : ' (logged in the CERT-Army case queue; email delivery pending).'));
+      setChatVisible(true);
+      setChatCountdown(8);
     } catch (err) {
-      console.error('Mail error:', err);
+      console.error('Escalation error:', err);
+      setMailRes('High severity threat detected, but the CERT-Army handover FAILED. Report this incident to your unit cyber cell manually.');
+    }
+  };
+
+  // Below threshold: personalised mitigation steps from Gemini (falls back to the defence playbook)
+  const fetchGeminiMitigation = async (report, text) => {
+    setMitigationSource('loading');
+    try {
+      const res = await fetch(`http://${ipfsAddress}:${ipfsPort}/gemini`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text,
+          category: report.final_prediction,
+          riskScore: report.final_risk_score,
+          threatLevel: report.threat_level,
+          evidence: report.details,
+        })
+      });
+      const data = await res.json();
+      const steps = data.status && data.data ? Object.values(data.data).filter(Boolean) : [];
+      if (!steps.length) throw new Error('no steps returned');
+      // only replace the steps if the user has not started a newer analysis meanwhile
+      setAiReport(prev => (prev === report ? { ...report, mitigation_steps: steps } : prev));
+      setMitigationSource(data.source === 'gemini' ? 'gemini' : 'rules');
+    } catch (err) {
+      console.error('Gemini mitigation error:', err);
+      setMitigationSource('model');
     }
   };
 
   // Run AI Threat Scan
+  // Shared tail of every analysis (single message, file, chat history):
+  // notarise on the ledger, then escalate to CERT-Army or fetch Gemini mitigation.
+  const finishAnalysis = async (data, contentCid, evidenceText, inputType) => {
+    setAiReport(data);
+    setMailRes("");
+    setMitigationSource("model");
+
+    const note = `${data.final_risk_score} ${data.final_prediction?.replace(/\s+/g, '_') || 'Threat_Report'} ${inputType}`;
+    if (contentCid) {
+      await blockchainIpfsAndMlResult(contentCid, note);
+    }
+
+    // the /chat guidance terminal reads this to brief Gemini on the actual case
+    localStorage.setItem('record', JSON.stringify({ ...data, reported_message: evidenceText }));
+
+    // escalate_cert_army is decided by the AI engine against its configured threshold
+    if (data.escalate_cert_army) {
+      setRiskColor("red");
+      await escalateToCert(data, evidenceText, contentCid, inputType);
+    } else if (data.final_risk_score >= 40) {
+      setRiskColor("yellow");
+      fetchGeminiMitigation(data, evidenceText); // not awaited: steps fill in when ready
+    } else {
+      setRiskColor("green");
+    }
+  };
+
+  // ---------------------------------------------------------------- chat history
+  const chatApi = `http://${mlAddress}:${mlPort}`;
+
+  const loadChatFile = async (f) => {
+    if (!f) return;
+    if (f.size > 5 * 1024 * 1024) { setChatError('Chat export is larger than 5 MB.'); return; }
+    setChatText(await f.text());
+    setChatFileName(f.name);
+    setChatParsed(null);
+    setChatError('');
+  };
+
+  // Step 1: parse the export and list the participants so the reporter can pick themselves
+  const readChat = async () => {
+    setChatError('');
+    try {
+      const res = await fetch(`${chatApi}/shield/transcript/parse`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript: chatText }),
+      });
+      const data = await res.json();
+      if (!data.status) throw new Error(data.error || `HTTP ${res.status}`);
+      setChatParsed(data);
+      const mine = [user?.name, user?.email?.split('@')[0]].filter(Boolean).map(s => s.toLowerCase());
+      const guess = data.senders.find(s => mine.some(m => s.name.toLowerCase().includes(m) || m.includes(s.name.toLowerCase())));
+      setChatMe(data.suggested_me || (guess ? guess.name : ''));
+    } catch (err) {
+      setChatParsed(null);
+      setChatError(`Could not read this chat: ${err.message}`);
+    }
+  };
+
+  // Step 2: vault the transcript, run all 5 Counter-Intel layers over the whole conversation
+  const handleChatAnalyze = async () => {
+    if (!chatParsed) return;
+    setIsChatLoading(true);
+    setChatError('');
+    setPipelineStep(1);
+    setCurrentStage('Generating Cryptographic SHA-256 Multihash of chat history...');
+    // excerpt for CERT-Army / Gemini: most recent messages, labelled by sender
+    const excerpt = chatParsed.messages.slice(-40)
+      .map(m => `${m.sender === chatMe ? `${m.sender} (reporter)` : m.sender}: ${m.text}`).join('\n').slice(-3500);
+    const evidence = `Chat history (${chatParsed.messages.length} messages${chatFileName ? `, ${chatFileName}` : ''}):\n${excerpt}`;
+    let contentCid = null;
+    try {
+      setPipelineStep(2);
+      setCurrentStage('Pinning chat history to decentralized IPFS Vault...');
+      const clientName = user?.name || user?.email || "Defence_Personnel";
+      const up = await fetch(`http://${ipfsAddress}:${ipfsPort}/uploadtext`, {
+        method: "POST",
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        credentials: "include",
+        body: `message=${encodeURIComponent(chatText)}&clientName=${encodeURIComponent(clientName)}`
+      });
+      const upData = await up.json();
+      if (upData.status) {
+        contentCid = upData.cid;
+        setCid(upData.cid);
+        setCidLink(upData.url || `http://${ipfsAddress}:${ipfsPort}/ipfs/${upData.cid}`);
+      }
+    } catch (err) {
+      console.error('Chat IPFS upload failed:', err);
+    }
+    try {
+      setPipelineStep(3);
+      setCurrentStage('5-Layer Counter-Intel Shield analysing the full conversation trajectory...');
+      const res = await fetch(`${chatApi}/shield/conversation`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript: chatText, me: chatMe }),
+      });
+      const data = await res.json();
+      if (!data.status) throw new Error(data.error || `HTTP ${res.status}`);
+      await finishAnalysis(data.fused, contentCid, evidence, 'chat_history');
+      setPipelineStep(5);
+      setCurrentStage('Conversation Analysis Complete • Recorded on Ledger');
+      setTimeout(() => setCurrentStage(''), 4000);
+    } catch (err) {
+      console.error('Conversation analysis error:', err);
+      setChatError(`Analysis failed: ${err.message}`);
+      setCurrentStage('');
+      setPipelineStep(0);
+    } finally {
+      setIsChatLoading(false);
+    }
+  };
+
   const handleAiPart = async (contentCid, textToAnalyze = null, fileToAnalyze = null) => {
     setPipelineStep(3);
     setCurrentStage('Neural Threat Classifier analyzing heuristics (<2s)...');
@@ -118,25 +278,10 @@ export default function MessageClassifier() {
       });
 
       const data = await response.json();
-      setAiReport(data);
-
-      const note = `${data.final_risk_score || data.final_confidence || 85} ${data.final_prediction?.replace(/\s+/g, '_') || 'Threat_Report'} ${targetFile ? filetype : 'message'}`;
-
-      if (contentCid) {
-        await blockchainIpfsAndMlResult(contentCid, note);
+      if (typeof data.final_risk_score !== 'number') {
+        throw new Error(data.error || `AI engine returned HTTP ${response.status}`);
       }
-
-      localStorage.setItem('record', JSON.stringify(data));
-
-      if (data.final_risk_score >= 80) {
-        setRiskColor("red");
-        await sendMailAlert(note, data.final_prediction);
-      } else if (data.final_risk_score >= 50) {
-        setRiskColor("yellow");
-      } else {
-        setRiskColor("green");
-      }
-
+      await finishAnalysis(data, contentCid, targetFile ? `File: ${targetFile.name}` : text, targetFile ? filetype : 'message');
       setPipelineStep(5);
       setCurrentStage('Forensic Verification Complete • Recorded on Ledger');
       setTimeout(() => setCurrentStage(''), 4000);
@@ -161,11 +306,13 @@ export default function MessageClassifier() {
     try {
       setPipelineStep(2);
       setCurrentStage('Pinning payload to decentralized IPFS Vault...');
+      const clientName = user?.name || user?.email || "Defence_Personnel";
       const backend = `http://${ipfsAddress}:${ipfsPort}/uploadtext`;
       const res = await fetch(backend, {
         method: "POST",
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `message=${encodeURIComponent(textSnapshot)}`
+        credentials: "include",
+        body: `message=${encodeURIComponent(textSnapshot)}&clientName=${encodeURIComponent(clientName)}`
       });
       const data = await res.json();
 
@@ -193,7 +340,8 @@ export default function MessageClassifier() {
     try {
       setPipelineStep(2);
       setCurrentStage('Distributing cryptographic payload to IPFS node cluster...');
-      const data = await uploadtoipfs(fileSnapshot);
+      const clientName = user?.name || user?.email || "Defence_Personnel";
+      const data = await uploadtoipfs(fileSnapshot, clientName);
 
       if (data && data.status) {
         setCid(data.cid);
@@ -364,8 +512,8 @@ export default function MessageClassifier() {
         {/* Console Workspace Body */}
         <div className="p-6 sm:p-8 space-y-6">
 
-          {/* Mode Tabs: Text vs File */}
-          <div className="flex rounded-xl bg-slate-950 p-1 border border-slate-800 max-w-md">
+          {/* Mode Tabs: Text vs Chat History vs File */}
+          <div className="flex flex-wrap rounded-xl bg-slate-950 p-1 border border-slate-800 max-w-2xl">
             <button
               onClick={() => setActiveTab('text')}
               className={`flex-1 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 ${
@@ -375,7 +523,18 @@ export default function MessageClassifier() {
               }`}
             >
               <Terminal className="w-4 h-4" />
-              <span>Suspicious Text / Chat</span>
+              <span>Suspicious Message</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('chat')}
+              className={`flex-1 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 ${
+                activeTab === 'chat'
+                  ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-slate-950 shadow-md'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <MessagesSquare className="w-4 h-4" />
+              <span>Chat History</span>
             </button>
             <button
               onClick={() => setActiveTab('file')}
@@ -446,6 +605,103 @@ export default function MessageClassifier() {
                       <Shield className="w-4 h-4" />
                       <span>ANALYZE & VAULT EVIDENCE</span>
                     </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: Chat history -> multi-turn 5-layer analysis */}
+          {activeTab === 'chat' && (
+            <div className="space-y-4 bg-slate-950/50 p-5 rounded-xl border border-slate-800/80">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="text-xs font-bold text-violet-400 font-tactical tracking-wider flex items-center gap-2 uppercase">
+                  <MessagesSquare className="w-4 h-4 text-violet-400" />
+                  [UPLOAD CONVERSATION HISTORY FOR MULTI-TURN ANALYSIS]
+                </label>
+                <span className="text-[11px] font-mono text-slate-500">WhatsApp .txt • Telegram .json • .csv • paste</span>
+              </div>
+
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Honeytraps and elicitation build up slowly: each message can look harmless on its own.
+                Upload the whole conversation so the 5-layer shield can track how it progresses
+                (rapport → trust → elicitation), whether the contact keeps probing after you refuse, and reply patterns.
+                In WhatsApp: open the chat → ⋮ → More → Export chat → Without media.
+              </p>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <input type="file" id="chat-file" accept=".txt,.json,.csv,text/plain,application/json,text/csv" className="hidden"
+                       onChange={(e) => loadChatFile(e.target.files[0])} />
+                <label htmlFor="chat-file"
+                       className="cursor-pointer px-4 py-2 rounded-xl text-xs font-bold bg-slate-900 border border-violet-500/40 text-violet-300 hover:bg-slate-800 transition flex items-center gap-2">
+                  <UploadCloud className="w-4 h-4" />
+                  <span>{chatFileName || 'Upload chat export'}</span>
+                </label>
+                <span className="text-[11px] text-slate-500 font-mono">or paste the conversation below</span>
+              </div>
+
+              <textarea
+                rows={7}
+                value={chatText}
+                onChange={(e) => { setChatText(e.target.value); setChatParsed(null); setChatFileName(''); }}
+                placeholder={"12/11/26, 9:02 pm - Priya: Hi! I saw your profile in the group\n12/11/26, 9:10 pm - Rahul: Hi, who is this?\n...\n\n(one message per line as 'Name: message' also works)"}
+                className="w-full p-4 bg-[#080d1a] border border-slate-700/80 rounded-xl text-slate-100 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 text-xs font-mono placeholder-slate-600 transition"
+              />
+
+              {chatParsed && (
+                <div className="space-y-2 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
+                  <p className="text-xs text-slate-300">
+                    Read <b>{chatParsed.messages.length}</b> messages ({chatParsed.format})
+                    {chatParsed.truncated > 0 && <> — only the most recent {chatParsed.messages.length} are analysed ({chatParsed.truncated} older ones skipped)</>}.
+                  </p>
+                  {chatParsed.speakers_inferred && (
+                    <p className="text-[11px] text-amber-300">
+                      This paste has no sender names, so messages were assumed to alternate between two people
+                      (Person 1 starts). Pick which one is you, or "Not in this chat".
+                    </p>
+                  )}
+                  <label className="text-[11px] font-mono uppercase tracking-wider text-violet-300 block">Which participant are you?</label>
+                  <div className="flex flex-wrap gap-2">
+                    {chatParsed.senders.map(s => (
+                      <button key={s.name} type="button" onClick={() => setChatMe(s.name)}
+                              className={`px-3 py-1.5 rounded-lg text-xs border transition ${chatMe === s.name
+                                ? 'bg-violet-500 text-slate-950 border-violet-400 font-bold'
+                                : 'bg-slate-950 text-slate-300 border-slate-700 hover:border-violet-500/60'}`}>
+                        {s.name} <span className="opacity-60">({s.count})</span>
+                      </button>
+                    ))}
+                    <button type="button" onClick={() => setChatMe('')}
+                            className={`px-3 py-1.5 rounded-lg text-xs border transition ${chatMe === ''
+                              ? 'bg-slate-200 text-slate-950 border-slate-100 font-bold'
+                              : 'bg-slate-950 text-slate-400 border-slate-700 hover:border-slate-500'}`}>
+                      Not in this chat
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-500">Your own messages are used as context (e.g. refusals) but are not scored as threats.</p>
+                </div>
+              )}
+
+              {chatError && <p className="text-xs text-red-400">{chatError}</p>}
+
+              <div className="flex flex-wrap justify-end gap-3 pt-1">
+                <button
+                  onClick={readChat}
+                  disabled={!chatText.trim() || isChatLoading}
+                  className={`px-5 py-2.5 rounded-xl text-xs font-bold border border-violet-500/50 text-violet-200 bg-slate-900 hover:bg-slate-800 transition ${
+                    !chatText.trim() || isChatLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  1. READ CHAT
+                </button>
+                <button
+                  onClick={handleChatAnalyze}
+                  disabled={!chatParsed || isChatLoading}
+                  className={`px-6 py-2.5 bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-400 hover:to-fuchsia-400 text-slate-950 font-black rounded-xl text-xs transition shadow-lg shadow-violet-500/20 flex items-center gap-2 ${
+                    !chatParsed || isChatLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {isChatLoading ? (
+                    <><Activity className="w-4 h-4 animate-spin" /><span>ANALYSING CONVERSATION...</span></>
+                  ) : (
+                    <><Shield className="w-4 h-4" /><span>2. ANALYZE CONVERSATION</span></>
                   )}
                 </button>
               </div>
@@ -610,8 +866,48 @@ export default function MessageClassifier() {
 
               {/* Threat Details */}
               <div className="py-4 text-sm text-slate-300 leading-relaxed font-normal">
+                {aiReport.analysed_as_conversation && (
+                  <p className="mb-2 text-xs text-violet-300 font-mono">
+                    This text looks like a pasted chat, so it was analysed as a whole conversation.
+                    For best results use the Chat History tab and pick which participant you are.
+                  </p>
+                )}
                 {aiReport.details}
               </div>
+
+              <CounterIntelPanel report={aiReport} />
+
+              {/* Conversation timeline (chat-history analysis only) */}
+              {Array.isArray(aiReport.counter_intel?.turns) && aiReport.counter_intel.turns.length > 0 && (() => {
+                const STAGES = ['CONTACT', 'RAPPORT', 'TRUST / ISOLATION', 'ELICITATION', 'EXPLOITATION'];
+                const traj = (aiReport.counter_intel.layers || []).find(l => l.layer === 5);
+                return (
+                  <div className="mt-4 pt-4 border-t border-slate-800 space-y-2">
+                    <h4 className="text-xs font-bold text-violet-300 uppercase tracking-wider font-tactical flex items-center gap-1.5">
+                      <MessagesSquare className="w-3.5 h-3.5" />
+                      <span>Conversation trajectory ({aiReport.counter_intel.turns.length} contact messages)</span>
+                    </h4>
+                    {traj && (
+                      <p className="text-[11px] font-mono text-slate-400">
+                        Multi-turn verdict: <span className="text-violet-300 font-bold">{traj.verdict}</span> ({Math.round(traj.score)}%)
+                        {traj.signals?.length > 0 && <> • {traj.signals.join(' • ')}</>}
+                      </p>
+                    )}
+                    <ol className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                      {aiReport.counter_intel.turns.map((t, i) => (
+                        <li key={i} className="flex items-start gap-2.5 text-xs bg-slate-900/60 p-2 rounded-lg border border-slate-800/80">
+                          <span className={`shrink-0 w-10 text-center font-mono font-bold rounded px-1 py-0.5 ${
+                            t.level1_risk >= 80 ? 'bg-red-500/20 text-red-300' : t.level1_risk >= 40 ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
+                            {t.level1_risk}
+                          </span>
+                          <span className="shrink-0 w-28 text-[10px] font-mono uppercase text-slate-500 pt-0.5">{STAGES[t.stage] || t.stage}</span>
+                          <span className="text-slate-300 break-words">{t.text}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                );
+              })()}
 
               {/* Tactical Mitigation Guidance (Gemini / Defense Playbook) */}
               {aiReport.mitigation_steps && aiReport.mitigation_steps.length > 0 && (
@@ -620,6 +916,18 @@ export default function MessageClassifier() {
                     <Shield className="w-3.5 h-3.5" />
                     <span>Actionable Mitigation Protocols for Defence Personnel:</span>
                   </h4>
+                  {mitigationSource && (
+                    <p className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
+                      {{
+                        loading: 'Generating personalised guidance with Gemini AI…',
+                        gemini: 'Personalised guidance generated by Gemini AI',
+                        rules: 'Gemini unavailable: NetGenX defence playbook guidance',
+                        model: aiReport.escalate_cert_army
+                          ? 'Case escalated to CERT-Army: immediate containment steps'
+                          : 'NetGenX AI engine guidance',
+                      }[mitigationSource]}
+                    </p>
+                  )}
                   <ul className="space-y-2 text-xs text-slate-300 font-sans">
                     {aiReport.mitigation_steps.map((step, idx) => (
                       <li key={idx} className="flex items-start gap-2.5 bg-slate-900/70 p-3 rounded-xl border border-slate-800/80">
