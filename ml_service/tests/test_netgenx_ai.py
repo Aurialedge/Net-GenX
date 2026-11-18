@@ -354,3 +354,37 @@ def test_transcript_parse_endpoint(client):
                     content_type="multipart/form-data").get_json()
     assert r["status"] and {s["name"] for s in r["senders"]} == {"Mummy", "Rahul"}
     assert client.post("/shield/transcript/parse", json={"transcript": "   "}).status_code == 400
+
+
+# ----------------------------------------------------------------- sample chat histories (repo: test_chats/)
+SAMPLE_CHATS = os.path.join(os.path.dirname(ROOT), "test_chats")
+
+
+@pytest.mark.parametrize("fname, me, escalate", [
+    ("01_honeytrap_whatsapp_android.txt", "Vikram Singh", True),
+    ("02_slow_elicitation_whatsapp_android.txt", "Arjun", True),
+    ("03_sextortion_whatsapp_iphone.txt", "Major Rathore", True),
+    ("04_fake_recruiter_telegram.json", "Col (Retd) Mehta", True),
+    ("05_otp_scam.csv", "Sub. Kumar", True),
+    ("06_hinglish_opsec_whatsapp.txt", "Deepak", True),
+    ("07_benign_family_whatsapp_iphone.txt", "Rahul", False),
+    ("08_benign_unit_group_whatsapp.txt", "Nk Sharma", False),
+])
+def test_sample_chat_histories(client, fname, me, escalate):
+    path = os.path.join(SAMPLE_CHATS, fname)
+    if not os.path.exists(path):
+        pytest.skip("test_chats/ not present")
+    raw = open(path, encoding="utf-8").read()
+    r = client.post("/shield/conversation", json={"transcript": raw, "me": me}).get_json()
+    traj = next(l for l in r["counter_intel"]["layers"] if l["layer"] == 5)
+    assert traj["status"] == "ok"
+    assert r["fused"]["escalate_cert_army"] is escalate, (fname, r["fused"]["final_risk_score"])
+    if not escalate:
+        assert r["fused"]["final_risk_score"] < 40
+
+
+def test_hinglish_refusal_then_probing_is_detected(client):
+    raw = open(os.path.join(SAMPLE_CHATS, "06_hinglish_opsec_whatsapp.txt"), encoding="utf-8").read()
+    r = client.post("/shield/conversation", json={"transcript": raw, "me": "Deepak"}).get_json()
+    traj = next(l for l in r["counter_intel"]["layers"] if l["layer"] == 5)
+    assert any("after_refusal" in s for s in traj["signals"])

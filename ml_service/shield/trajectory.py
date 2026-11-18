@@ -24,8 +24,13 @@ from .common import JsonStore, layer_result, rx
 STAGES = ["CONTACT", "RAPPORT", "TRUST_ISOLATION", "ELICITATION", "EXPLOITATION"]
 MAX_TURNS = 60
 MAX_SESSIONS = 2000
-REFUSAL_RE = rx(r"\b(?:can'?t (?:tell|share|say)|cannot (?:share|disclose)|not allowed|classified|i won'?t (?:share|send)|no,? sorry|not possible|why do you (?:want|need|ask))\b")
-OPSEC_TOPIC_RE = rx(r"\b(?:unit|regiment|battalion|post|base|deploy\w*|border|convoy|weapon\w*|radar|missile\w*|troops?|patrol\w*|duty|roster|location|stationed|posted|frequenc\w+)\b")
+REFUSAL_RE = rx(r"\b(?:can'?t (?:tell|share|say)|cannot (?:share|disclose)|not allowed|classified|i won'?t (?:share|send)|no,? sorry|not possible|why do you (?:want|need|ask)"
+                # Hinglish: "nahi bata sakta", "bata nahi sakti", "share nahi kar sakta", "allowed nahi hai", "mana hai"
+                r"|nahi?n? (?:bata|bol|share kar) ?(?:sakta|sakti|sakte|paunga|paungi|skta)|(?:bata|bol|share kar) nahi?n? (?:sakta|sakti|sakte|skta)"
+                r"|allowed nahi|mana hai|nahi bataunga|nahi bataungi)\b"
+                r"|नहीं बता सकत|बता नहीं सकत|नहीं बताऊंगा|मना है")
+OPSEC_TOPIC_RE = rx(r"\b(?:unit|regiment|battalion|post|base|deploy\w*|border|convoy|weapon\w*|radar|missile\w*|troops?|patrol\w*|duty|roster|location|stationed|posted|posting|frequenc\w+"
+                    r"|jawan|gaadi\w*|tainaat|tainat)\b|तैनात|जवान|यूनिट|काफिला")
 
 
 def turn_stage(intent_layer, level1):

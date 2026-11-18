@@ -1,0 +1,62 @@
+{
+ "name": "Defence Careers HR",
+ "type": "personal_chat",
+ "id": 559102,
+ "messages": [
+  {
+   "id": 1,
+   "type": "message",
+   "date": "2026-12-01T10:00:00",
+   "from": "Defence Careers HR",
+   "text": "Good morning sir, greetings from Defence Careers Consultancy."
+  },
+  {
+   "id": 2,
+   "type": "message",
+   "date": "2026-12-01T10:01:10",
+   "from": "Defence Careers HR",
+   "text": [
+    "We have a high paying part-time consultancy role for serving and retired officers: ",
+    {
+     "type": "bold",
+     "text": "Rs 3 lakh per month"
+    }
+   ]
+  },
+  {
+   "id": 3,
+   "type": "message",
+   "date": "2026-12-01T10:20:00",
+   "from": "Col (Retd) Mehta",
+   "text": "What kind of work is it?"
+  },
+  {
+   "id": 4,
+   "type": "message",
+   "date": "2026-12-01T10:21:00",
+   "from": "Defence Careers HR",
+   "text": "Very simple sir. Our foreign clients want analysis reports on Indian defence equipment and deployments."
+  },
+  {
+   "id": 5,
+   "type": "message",
+   "date": "2026-12-01T10:23:00",
+   "from": "Defence Careers HR",
+   "text": "As a sample, please share which radars and missile systems are deployed in your old sector and the unit locations."
+  },
+  {
+   "id": 6,
+   "type": "message",
+   "date": "2026-12-01T10:40:00",
+   "from": "Col (Retd) Mehta",
+   "text": "I can't share that, it is classified."
+  },
+  {
+   "id": 7,
+   "type": "message",
+   "date": "2026-12-01T10:41:00",
+   "from": "Defence Careers HR",
+   "text": "Sir it is only for research, nobody will know. Even old troop strength figures will do. We pay in advance."
+  }
+ ]
+}
