@@ -20,6 +20,7 @@ import statistics
 import numpy as np
 
 from preprocessor import MONEY_RE, URL_RE
+from risk_rules import conversation_evidence
 from shield import intent as L1
 from shield import synthetic as L3
 from shield import zero_trust as L4
@@ -36,7 +37,7 @@ FEATURE_NAMES = (
     + ["tier_mean_low", "tier_mean_med", "tier_mean_high", "tier_max_high"]
     + ["stage_max", "stage_last", "stage_mean", "stage_mono", "stage_distinct", "first_elicit_pos"]
     + ["intent_max", "intent_mean", "info_req_frac", "secrecy_n", "flattery_frac"]
-    + ["ev_secret_ask", "ev_payload", "ev_cred_lure", "ev_extortion"]
+    + ["ev_secret_ask", "ev_payload", "ev_cred_lure", "ev_extortion", "ev_fee_scam", "ev_conv_extortion"]
     + ["refusals", "probe_after_refusal", "probe_after_refusal_flag", "opsec_frac", "opsec_drift"]
     + ["zt_score", "syn_score", "money_flag", "url_flag"]
 )
@@ -124,7 +125,9 @@ def featurize(turns, zt_score, syn_score):
           sum(bool(d.get("is_information_request")) for d in det) / n,
           sum(bool(x & {"secrecy_request", "channel_shift"}) for x in techs),
           sum(bool(x & {"flattery", "rapport_building"}) for x in techs) / n]
-    f += [float("OTP/PIN" in notes), float("payload" in notes), float("credential lure" in notes), float("extortion" in notes)]
+    conv_ev = conversation_evidence([t["text"] for t in c])
+    f += [float("OTP/PIN" in notes), float("payload" in notes), float("credential lure" in notes), float("extortion" in notes),
+          float("task-scam" in notes), float(bool(conv_ev))]
     f += [min(5, refusals), min(5, probes), float(probes > 0), sum(t["opsec"] for t in c) / n, late_ops - early_ops]
     # (reply-timing features were tried and dropped: synthetic timing carries no real signal and
     #  real chats' minute-level gaps sat outside the training range, destabilising predictions)
@@ -139,7 +142,8 @@ def featurize(turns, zt_score, syn_score):
 # "casual-looking chat, so ignore the probing after a refusal".
 MONOTONE_UP = {"r_max", "r_top2", "r_frac40", "r_frac80", "r_n80", "r_late_max", "cat_max_1", "cat_max_2", "cat_max_3",
                "cat_max_4", "cat_max_5", "tier_mean_high", "tier_max_high", "stage_max", "intent_max", "info_req_frac",
-               "secrecy_n", "ev_secret_ask", "ev_payload", "ev_cred_lure", "ev_extortion", "probe_after_refusal",
+               "secrecy_n", "ev_secret_ask", "ev_payload", "ev_cred_lure", "ev_extortion", "ev_fee_scam", "ev_conv_extortion",
+               "probe_after_refusal",
                "probe_after_refusal_flag", "zt_score"}
 MONOTONE_DOWN = {"tier_mean_low", "cat_mean_0"}
 
@@ -169,6 +173,22 @@ class OrdinalMonotoneClassifier:
         p1 = self.ge1.predict_proba(X)[:, 1]
         p2 = np.minimum(self.ge2.predict_proba(X)[:, 1], p1)
         return np.column_stack([1 - p1, p1 - p2, p2])
+
+    def predict(self, X):
+        return self.predict_proba(X).argmax(1)
+
+
+class BaggedConversationModel:
+    """Average of several ordinal models, each trained on an independently generated corpus.
+
+    A single model's LOW/MEDIUM boundary moved between retrains with the particular random
+    corpus; averaging independently trained members cancels that variance."""
+
+    def __init__(self, members):
+        self.members = list(members)
+
+    def predict_proba(self, X):
+        return np.mean([m.predict_proba(X) for m in self.members], axis=0)
 
     def predict(self, X):
         return self.predict_proba(X).argmax(1)

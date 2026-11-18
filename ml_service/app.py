@@ -269,6 +269,11 @@ def _conversation_report(data):
                       and l.get("confidence", 0) >= 0.5), None)
         final = round(max(cm["score"], cm["evidence_floor"], graph["score"] if graph else 0))
         fused["final_risk_score"] = int(final)
+        # threat type: the hard-evidence rule that set the score, else the conversation-level category
+        cat = cm["evidence_category"] if (cm.get("evidence_category") and cm["evidence_floor"] >= cm["score"])             else cm.get("conversation_category") or fused.get("category_id")
+        if final >= 40 and cat:
+            fused.update(category_id=int(cat), final_prediction=CATEGORY_NAMES[int(cat)],
+                         threat_type=CATEGORY_NAMES[int(cat)].split("&")[0].strip(), mitigation_steps=MITIGATIONS[int(cat)])
         fused["threat_level"] = threat_level(final)
         fused["escalate_cert_army"] = final >= ESCALATION_THRESHOLD
         if final < 40:

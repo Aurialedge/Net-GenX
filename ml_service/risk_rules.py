@@ -40,6 +40,22 @@ def asks_for_secret(t):
     return False
 
 
+_ENABLE_MACRO_RE = re.compile(r"\benable\W{0,3}(?:content|macros?|editing)\b|\bmacros? (?:are|is) (?:needed|required)\b", re.I)
+# "install it and allow everything / ignore the warning" - malware delivery without a file name
+_INSTALL_RE = re.compile(r"\b(?:install|download|sideload)\w*\b|\binstall karo\b", re.I)
+_BYPASS_RE = re.compile(r"\ballow (?:everything|all|all permissions|unknown sources|from unknown)\b|\bunknown sources\b"
+                        r"|\bignore (?:that|the|this|it|any)?\s*(?:warning|alert|message|popup)?\b.{0,40}\b(?:harmful|unsafe|warning|virus|play protect)\b"
+                        r"|\b(?:disable|turn off) (?:play protect|antivirus|security)\b|\ballow (?:it|this) when it asks\b", re.I)
+
+# Paying a stranger is only flagged with a scam marker: "send 2000 to my account" from family is fine,
+# "deposit 10,000 to the merchant account to unlock VIP tasks" is not.
+_PAY_RE = re.compile(r"\b(?:deposit|transfer|pay|send|scan|invest)\w*\b", re.I)
+_FEE_SCAM_RE = re.compile(
+    r"\b(?:merchant account|vip (?:task|level|member)\w*|(?:prepaid|recharge|merchant) tasks?|registration fee|processing fee"
+    r"|activation fee|unlock (?:fee|charges?)|gate ?pass\b|courier (?:fee|charges?)|token amount|release (?:fee|charges?)"
+    r"|(?:transport|delivery|shipping) charges?\b[^.?!\n]{0,30}\bfirst"
+    r"|withdraw\w*\b[^.?!\n]{0,40}\b(?:after|once|same day)|guaranteed returns?|\d+% (?:returns?|profit))", re.I)
+
 _DEMAND_RE = re.compile(r"\b(?:send|share|pay|transfer|give|cooperate|or (?:we|you|else|your)|otherwise|unless)\b", re.I)
 _LEVERAGE_RE = re.compile(r"\b(?:video|photos?|pics?|chats?|records|recordings?|history|recorded|screenshots?|folder|affair)\b", re.I)
 
@@ -55,10 +71,80 @@ def evidence_floors(t):
                        "credential lure pointing to non-government domain"))
     if asks_for_secret(t):
         floors.append((2, 88, "request to hand over an OTP/PIN/CVV/password"))
+    if _FEE_SCAM_RE.search(t) and _PAY_RE.search(t):
+        floors.append((2, 85, "advance-fee / task-scam payment demand"))
+    if _ENABLE_MACRO_RE.search(t):
+        floors.append((3, 88, "instruction to enable macros / active content"))
+    if _INSTALL_RE.search(t) and _BYPASS_RE.search(t):
+        floors.append((3, 88, "instruction to install an app and bypass security warnings"))
     if (LEXICON_RE["coercion"].search(t) or LEXICON_RE["veiled_threat"].search(t)) \
             and _DEMAND_RE.search(t) and _LEVERAGE_RE.search(t):
         floors.append((4, 85, "leverage + demand (extortion pattern)"))
     return floors
+
+
+def conversation_evidence(contact_texts):
+    """Hard evidence that only shows up across several messages of one sender.
+
+    Extortion is routinely split: "we have your chats and photos" ... "send the roster" ...
+    "or these go to your unit group tonight". Returns [(category, min_score, note)].
+    """
+    texts = [str(t or "") for t in contact_texts]
+    joined = " \n ".join(texts)
+    out = []
+    has_leverage = any(_CONV_LEVERAGE_RE.search(t) for t in texts)
+    has_demand = bool(_CONV_DEMAND_RE.search(joined))
+    has_consequence = bool(_CONV_CONSEQUENCE_RE.search(joined))
+    if has_leverage and has_demand and has_consequence:
+        out.append((4, 88, "leverage + demand + threat across messages (extortion)"))
+    return out
+
+
+_CONV_LEVERAGE_RE = re.compile(
+    r"\b(?:we|i)\s+(?:have|got|saved|kept|recorded|still have)\b[^.?!\n]{0,60}\b(?:chats?|photos?|pics?|videos?|voice ?notes?|recordings?|screenshots?|messages)\b"
+    r"|\brecorded\s+(?:our|your|the|everything)\b|\b(?:video|photos?|chats?|recording)\b[^.?!\n]{0,20}\b(?:mere|hamare|humare|hamaare|humaare|apne) paas\b", re.I)
+_CONV_DEMAND_RE = re.compile(r"\b(?:send|pay|transfer|share|give|forward|bhej\w*|de do|dedo)\b", re.I)
+_CONV_CONSEQUENCE_RE = re.compile(
+    r"\b(?:go(?:es)? to|will be sent|be (?:sent|shared|posted)|unit group|your (?:co|wife|family|seniors|unit)|viral|upload|leak\w*"
+    r"|or else|otherwise|warna|nahi to|you have till|till \d|before \d|by (?:tonight|tomorrow)|don'?t try to be smart)\b", re.I)
+
+
+def _sensitive_ask(t):
+    """A probe: elicitation stage, a high-risk message, or a fairly risky message about a military topic.
+    Small talk after a refusal ("do you like cooking?") is not a probe."""
+    s = t["l1"]["score"]
+    return t.get("stage", 0) >= 3 or s >= 80 or (s >= 60 and t.get("opsec"))
+
+
+def trajectory_evidence(turns):
+    """Policy rules over the scored conversation (turns from conversation_model.build_turns_batch).
+
+    * persistent probing: 2+ sensitive asks (see _sensitive_ask) AFTER the reporter refused;
+    * repeated high-risk asks: 3+ separate contact messages scoring >= 80 that elicit, carry hard
+      evidence, or touch military topics.
+    Returns [(category, min_score, note)].
+    """
+    out, refused, probes, probe_cats = [], False, 0, []
+    contact = [t for t in turns if t.get("role") == "contact"]
+    for t in turns:
+        if t.get("role") == "user":
+            refused = refused or bool(t.get("refusal"))
+        elif refused and _sensitive_ask(t):
+            probes += 1
+            probe_cats.append(t["l1"]["category_id"] or 5)
+    if probes >= 2:
+        cat = max(set(probe_cats), key=probe_cats.count)
+        out.append((cat, 85, f"kept asking after the reporter refused ({probes} times)"))
+    # romance alone ("miss you", "send a cute pic") scores high too: count only asks for something sensitive
+    # policy: asking for operational details is HIGH - a friendly lead-in must not dilute two such asks
+    strong_ops = [t for t in contact if t["l1"]["score"] >= 85 and t.get("opsec") and t.get("stage", 0) >= 3]
+    if len(strong_ops) >= 2:
+        out.append((5, 85, f"{len(strong_ops)} requests for operational details"))
+    highs = [t for t in contact if t["l1"]["score"] >= 80 and (t["l1"]["notes"] or t.get("opsec"))]
+    if len(highs) >= 3:
+        cats = [t["l1"]["category_id"] or 5 for t in highs]
+        out.append((max(set(cats), key=cats.count), 85, f"{len(highs)} separate high-risk requests"))
+    return out
 
 
 def evidence_adjust(t, cat, score):

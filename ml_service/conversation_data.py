@@ -79,6 +79,21 @@ P = {
                 "Are you still working at the same company?", "Got married last year!", "Congrats! Send pics of the wedding",
                 "Remember our college days?", "Miss those days yaar", "Let's plan a reunion", "Where do you live now?",
                 "Still in Pune, same old place", "Kya chal raha hai aajkal?", "Kaafi time ho gaya baat kiye"],
+    # sports / gaming / films: military vocabulary with nothing military about it
+    "sports": ["Inter-unit football final on Sunday, be there by 0830", "We attack from the left wing, they're weak there",
+               "Defence stays compact, nobody leaves base position", "Mission is the trophy boys 🏆", "Their goalkeeper is very good",
+               "Bro online aaja, squad ready hai", "Today we attack the enemy base from the north", "I'll bring the sniper this time",
+               "Rank push karenge aaj", "That tank attack scene in the movie was 🔥", "The mission briefing scene was the best",
+               "Cricket practice at 6, bring your kit", "Our bowling attack is too weak", "Target 180, we can chase it",
+               "Captain said full attack in the second half", "GG bro, what a match"],
+    "sports_reply": ["Haha ok", "Roger", "Done", "5 min", "Let's go 💪", "Sure", "😂😂", "In"],
+    "couple": ["Happy Valentine's day jaan ❤️", "Send a cute pic na", "Video call tonight?", "Where are you right now? Reached?",
+               "I miss you so much", "Can't wait for the wedding", "Mom liked the ring", "Send me a selfie in that new shirt",
+               "Good morning love", "Wish you were here", "Sleep early today ok?", "Love you more"],
+    "admin": ["CO signed today. Collect the leave certificate tomorrow after 1100", "Bring your ID card and fill the address on leave",
+              "Return on time this time 😄", "Your TA claim is passed, check your account next week", "Submit the medical documents to the MI room",
+              "Pay slip for October is uploaded on the portal", "Course nomination list is out, your name is there",
+              "Get the gate pass signed by the adjutant", "Canteen card renewal forms are at the CSD counter"],
     "service": ["Your order is out for delivery", "Your SBI account is credited with salary Rs 68,450", "OTP for login is 482913. Do not share it with anyone",
                 "Rs 1,250 debited for UPI/swiggy", "Your recharge of Rs 299 is successful", "Electricity bill of Rs 1,830 paid successfully",
                 "Your IRCTC ticket is confirmed, PNR 4521", "Your pension for November has been credited"],
@@ -140,6 +155,32 @@ T = {
     "journo": ["I'm writing a feature on India's armed forces, thank you for your service", "I'd love to understand daily life in high-altitude areas",
                "For accuracy, which formation are you with and what systems has your sector received?",
                "Only approximate troop numbers at forward posts would help, it stays anonymous"],
+    # offers that ask for nothing yet (MEDIUM): jobs, lotteries, paid research
+    "offer": ["Overseas security job for ex-servicemen, salary 2 lakh per month", "Interested? I'll share the details soon",
+              "Please keep this confidential till the selection is done", "Hello, are you the lucky winner of the KBC WhatsApp lottery?",
+              "You won 35 lakh, our manager will call you", "Please save this number and don't tell anybody till the process completes",
+              "Congratulations, your profile is shortlisted for a consultancy role", "We will email the offer letter next week"],
+    "research": ["I am a PhD researcher studying the wellbeing of soldiers", "Participation is voluntary and anonymous",
+                 "There is a small honorarium for your time", "I'd like to understand daily routines, stress and family separation",
+                 "I will share a short questionnaire tomorrow", "Thank you for your service"],
+    # task scam that turns into a deposit (HIGH)
+    "task": ["Congrats! You completed 3 tasks and earned ₹450 💰", "You're now eligible for VIP merchant tasks with 30% returns",
+             "Just like videos and rate hotels, payment same day", "Our members earn lakhs every month"],
+    "task_pay": ["Deposit ₹10,000 to the merchant account to unlock VIP tasks and withdraw ₹13,000 the same day",
+                 "Pay the ₹2,000 activation fee to continue earning", "Transfer within 30 minutes or the slot goes to the next member",
+                 "Recharge ₹5,000 to the merchant account, guaranteed returns"],
+    # extortion split across messages (HIGH)
+    "leverage": ["We have all your chats, voice notes and the photos you sent", "Remember Kavya? She was working with us",
+                 "I saved everything you sent me on video call", "Tumhari saari chats mere paas hai"],
+    "demand": ["Send a photo of your unit's duty roster for next week", "Share the location of your company", "Pay 50,000 to this account",
+               "Simple. Send the posting list and nobody will know"],
+    "consequence": ["Or these go to your unit group tonight", "You have till 9 pm", "Otherwise your CO and your wife see everything",
+                    "Warna sab viral kar dunga", "Don't try to be smart"],
+    # offers of an app / a different chat app that are dropped after a refusal (MEDIUM)
+    "app_offer": ["I made an app for sharing pics privately, want it?", "Let me send you a file, it has all the photos",
+                  "Shall I send you a better chat app? WhatsApp is boring", "Let's move to Telegram, it's more private",
+                  "I can send you a video player app, works better", "Download karoge ek app? Bahut achha hai"],
+    "drop_it": ["Ok fine, no problem 🙂", "Arre ok, forget it", "Alright, WhatsApp is fine then", "Ok as you wish", "Cool, no pressure"],
     # MEDIUM-only content: suspicious but no harmful ask
     "spam": ["Congratulations! Your number won Rs 25 lakh in the lucky draw", "Call our manager on {phone} to claim your prize",
              "Work from home and earn Rs 3,000 daily, join our Telegram", "Offer valid today only, call fast",
@@ -149,6 +190,11 @@ T = {
     "small": ["What music do you like?", "I love trekking, have you been to Himachal?", "Which movie did you watch recently?",
               "Do you like cooking?", "Have a good night!", "What do you do on weekends?", "Haha that's funny",
               "I'm reading a nice book these days", "We should chat more sometime"],
+    "debt": ["Mere paise kab dega?", "It's been 3 months, where is my money?", "Rent pending hai 2 mahine se",
+             "You promised to return the loan by Diwali", "Har baar bahana banata hai", "I need my 15,000 back this week",
+             "Salary aayi na? Ab toh de de", "Bhai urgent hai, paise chahiye", "Landlord se kehke nikalwa dunga", "Main tere office aa jaunga"],
+    "debt_reply": ["Next month pakka", "Salary aate hi de dunga", "Thoda time de yaar", "I'm trying, please wait", "Abhi nahi hai",
+                   "Sorry bro, next week", "Haan yaad hai"],
     "pressure": ["Return my money this week or there will be trouble", "You'll regret ignoring me", "Stop avoiding my calls",
                  "Settle the dues soon, I'm warning you", "Udhaar kab wapas karega yaar?", "Har baar yahi bolta hai, ab nahi chalega",
                  "Agle hafte tak nahi mila toh tere ghar aa jaunga", "Mera udhaar wapas kar warna dekh lena",
@@ -207,16 +253,28 @@ SCENARIOS = {
     "catchup": (0, 0, lambda r: [(("c", r.choice(["catchup", "casual"])) if i % 2 == 0 else ("u", r.choice(["catchup", "casual"]))) for i in range(r.randint(4, 14))]),
     "unit_group": (0, 0, lambda r: [(("c", "unit") if i % 2 == 0 else ("u", "unit_reply")) for i in range(r.randint(3, 16))]),
     "service_sms": (0, 0, lambda r: [("c", "service")] * r.randint(2, 6)),
+    "sports_gaming": (0, 0, lambda r: [(("c", "sports") if i % 2 == 0 else ("u", r.choice(["sports_reply", "sports"]))) for i in range(r.randint(3, 14))]),
+    "couple": (0, 0, lambda r: [(("c", r.choice(["couple", "couple", "casual"])) if i % 2 == 0 else ("u", "spouse_reply")) for i in range(r.randint(3, 14))]),
+    "unit_admin": (0, 0, lambda r: [(("c", "admin") if i % 2 == 0 else ("u", "unit_reply")) for i in range(r.randint(2, 8))]),
     # ---------------- MEDIUM
-    "friendly_stranger": (1, 1, lambda r: [("c", "open"), ("u", "neutral")] + [("c", "small"), ("u", "neutral")] * r.randint(1, 3)
-                          + [("c", "rapport")] * r.randint(0, 1)),
+    "offer_no_ask": (1, 2, lambda r: [("c", "offer"), ("u", "neutral")] + [("c", "offer")] * r.randint(1, 3)),
+    "researcher_no_ask": (1, 5, lambda r: [("c", "research"), ("u", "neutral")] + [("c", "research")] * r.randint(1, 3) + [("u", "neutral")]),
+    "friendly_stranger": (1, 1, lambda r: [("c", "open"), ("u", "neutral")] + [("c", r.choice(["small", "rapport"])), ("u", "neutral")] * r.randint(1, 3)
+                          + [("c", "rapport")] * r.randint(1, 2)),
+    "app_offer_dropped": (1, 3, lambda r: [("c", "open"), ("u", "neutral"), ("c", "rapport"), ("c", "app_offer"), ("u", "refuse"),
+                                           ("c", "drop_it")] + [("c", "small"), ("u", "neutral")] * r.randint(0, 2)),
     "spam_thread": (1, 2, lambda r: [("c", "spam")] * r.randint(2, 4) + [("u", "neutral")] * r.randint(0, 1)),
     "one_question_dropped": (1, 5, lambda r: [("c", "open"), ("u", "neutral"), ("c", r.choice(["elicit", "elicit_soft"])),
                                               ("u", "refuse")] + [("c", "small"), ("u", "neutral")] * r.randint(1, 3)),
-    "vague_pressure": (1, 4, lambda r: [("c", "pressure"), ("u", "neutral")] * r.randint(1, 3)),
+    # personal disputes: money owed, grudges - pressure without leverage or a military angle (MEDIUM)
+    "vague_pressure": (1, 4, lambda r: [("c", r.choice(["pressure", "debt"])), ("u", r.choice(["neutral", "debt_reply"]))] * r.randint(1, 4)
+                       + [("c", "pressure")]),
     "group_with_spam": (1, 2, lambda r: [("c", "unit"), ("u", "unit_reply")] * r.randint(1, 3) + [("s", "spam")]
                         + [("c", "unit")] * r.randint(0, 2)),
     # ---------------- HIGH
+    "task_scam": (2, 2, lambda r: [("c", "task"), ("u", "neutral"), ("c", "task")] + [("c", "task_pay")] * r.randint(1, 2)),
+    "blackmail_split": (2, 4, lambda r: [("c", "open"), ("c", "leverage"), ("u", "scared"), ("c", "demand"), ("u", "refuse"),
+                                         ("c", "consequence")] + [("c", "consequence")] * r.randint(0, 1)),
     "honeytrap": (2, 1, lambda r: _honeytrap(r, persist=r.random() < 0.5)),
     "slow_elicitation": (2, 5, lambda r: [("c", "open"), ("u", "neutral"), ("c", "small"), ("u", "neutral"),
                                           ("c", r.choice(["elicit", "elicit_soft"])), ("u", "refuse")]
@@ -233,11 +291,15 @@ SCENARIOS = {
                      + [("c", "exploit_mal")] * r.randint(0, 1)),
     "investment_scam": (2, 2, lambda r: [("c", "invest"), ("u", "neutral"), ("c", "invest"), ("c", "exploit_money")]),
     "journalist": (2, 5, lambda r: [("c", "journo"), ("u", "neutral"), ("c", "journo"), ("c", "elicit"), ("u", "refuse"), ("c", "persist")]),
-    "late_escalation": (2, 1, lambda r: [("c", "small"), ("u", "neutral")] * r.randint(3, 6) + [("c", "rapport"), ("c", "elicit"), ("c", "elicit")]),
+    # long friendly lead-ins (6-24 turns) before the turn, so length cannot dilute the escalation
+    "late_escalation": (2, 1, lambda r: [(("c", r.choice(["small", "casual"])) if i % 2 == 0 else ("u", r.choice(["neutral", "casual"])))
+                                         for i in range(r.randint(6, 24))] + [("c", "rapport"), ("c", "elicit"), ("u", "neutral"), ("c", "elicit")]),
 }
 # share of the corpus per scenario (LOW 40% / MEDIUM 20% / HIGH 40%)
 WEIGHTS = {"family": 8, "spouse": 8, "friends": 7, "unit_group": 7, "service_sms": 4, "casual_chat": 9, "catchup": 4,
-           "friendly_stranger": 6, "spam_thread": 4, "one_question_dropped": 5, "vague_pressure": 4, "group_with_spam": 3,
+           "friendly_stranger": 6, "spam_thread": 4, "one_question_dropped": 5, "vague_pressure": 6, "group_with_spam": 3,
+           "sports_gaming": 4, "couple": 4, "unit_admin": 3, "offer_no_ask": 3, "researcher_no_ask": 2,
+           "task_scam": 3, "blackmail_split": 3, "app_offer_dropped": 3,
            "honeytrap": 8, "slow_elicitation": 5, "sextortion": 4, "impersonation_otp": 4, "impersonation_docs": 3,
            "fake_recruiter": 3, "malware_drop": 3, "investment_scam": 3, "journalist": 3, "late_escalation": 4}
 

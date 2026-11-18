@@ -43,6 +43,26 @@ def _safe(layer_no, name, fn, *a, **kw):
                             verdict="DEGRADED", confidence=0.0, status="degraded")
 
 
+def _conversation_category(contact):
+    """Threat type of the whole chat: category probabilities weighted by each message's risk."""
+    import numpy as np
+    w = np.zeros(6)
+    for t in contact:
+        w += (t["l1"]["score"] / 100.0) ** 2 * np.asarray(t["l1"]["proba"])
+    return int(np.argmax(w[1:]) + 1)
+
+
+def _evidence_category(contact, conv_rules):
+    """Category of the strongest hard-evidence rule, if any fired."""
+    best = (0.0, None)
+    for cat, floor, _ in conv_rules:
+        best = max(best, (float(floor), cat), key=lambda x: x[0])
+    for t in contact:
+        if t["l1"]["notes"] and t["l1"]["score"] > best[0]:
+            best = (t["l1"]["score"], t["l1"]["category_id"])
+    return best[1]
+
+
 class CounterIntelShield:
     def __init__(self, level1_engine, seed_rows=None):
         self.level1 = level1_engine
@@ -102,6 +122,7 @@ class CounterIntelShield:
     def analyze_conversation(self, messages, *, channel=None, sender=None, sender_domain=None, verified_contact=False):
         """Stateless analysis of a full transcript: [{text, role: contact|user, ts?}]"""
         from conversation_model import build_turns_batch, featurize
+        from risk_rules import conversation_evidence, trajectory_evidence
         msgs = [{"text": str(m.get("text") or m.get("message") or ""), "role": m.get("role", "contact"), "ts": m.get("ts")}
                 for m in messages]
         try:
@@ -141,12 +162,17 @@ class CounterIntelShield:
         fused["turns"] = per_turn
 
         if self.conv_model is not None and self.conv_model.ready:
+            conv_rules = conversation_evidence([t["text"] for t in contact]) + trajectory_evidence(turns_full)
             try:
                 score, tier_p = self.conv_model.predict(featurize(turns_full, zt["score"], synth["score"]))
                 fused["conversation_model"] = {
                     "score": round(score, 1),
                     "tier_probabilities": {k: round(float(v), 4) for k, v in zip(("LOW", "MEDIUM", "HIGH"), tier_p)},
-                    "evidence_floor": max([0.0] + [t["l1"]["score"] for t in contact if t["l1"]["notes"]]),
+                    "evidence_floor": max([0.0] + [t["l1"]["score"] for t in contact if t["l1"]["notes"]]
+                                          + [floor for _, floor, _ in conv_rules]),
+                    "evidence_notes": sorted({n for t in contact for n in t["l1"]["notes"]} | {note for _, _, note in conv_rules}),
+                    "evidence_category": _evidence_category(contact, conv_rules),
+                    "conversation_category": _conversation_category(contact),
                     "version": self.conv_model.info.get("version"),
                     "trained_on": self.conv_model.info.get("n_train"),
                 }

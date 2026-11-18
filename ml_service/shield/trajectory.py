@@ -27,7 +27,14 @@ MAX_SESSIONS = 2000
 REFUSAL_RE = rx(r"\b(?:can'?t (?:tell|share|say)|cannot (?:share|disclose)|not allowed|classified|i won'?t (?:share|send)|no,? sorry|not possible|why do you (?:want|need|ask)"
                 # Hinglish: "nahi bata sakta", "bata nahi sakti", "share nahi kar sakta", "allowed nahi hai", "mana hai"
                 r"|nahi?n? (?:bata|bol|share kar) ?(?:sakta|sakti|sakte|paunga|paungi|skta)|(?:bata|bol|share kar) nahi?n? (?:sakta|sakti|sakte|skta)"
-                r"|allowed nahi|mana hai|nahi bataunga|nahi bataungi)\b"
+                r"|allowed nahi|mana hai|nahi bataunga|nahi bataungi"
+                # how people actually decline: short refusals, deflection to official channels, reporting
+                r"|no comments?|^no+\.?$|^nope|i can'?t\b(?! wait| believe| stop| sleep)|i cannot\b(?! wait| believe| stop| sleep)|not permitted|can'?t discuss|won'?t (?:tell|share|say|answer)"
+                r"|don'?t want to (?:share|say|tell)|not comfortable|why do (?:u|you) need|why does (?:she|he|they|your \w+) need|why (?:are|r) (?:u|you) asking"
+                r"|ask (?:through|via) (?:proper|official|the )?(?:channel|regt|regiment|unit|centre|center|office)"
+                r"|(?:i'?m|i am|i will|i'?ll) (?:report|reporting|inform|informing|tell my co|block)\w*"
+                r"|will (?:inform|report|tell) (?:my |the )?(?:co|unit|adjutant|security|mi|officer)"
+                r"|nahi (?:batana|bolna|dunga|dungi)|mat poocho)\b"
                 r"|नहीं बता सकत|बता नहीं सकत|नहीं बताऊंगा|मना है")
 OPSEC_TOPIC_RE = rx(r"\b(?:unit|regiment|battalion|post|base|deploy\w*|border|convoy|weapon\w*|radar|missile\w*|troops?|patrol\w*|duty|roster|location|stationed|posted|posting|frequenc\w+"
                     r"|jawan|gaadi\w*|tainaat|tainat)\b|तैनात|जवान|यूनिट|काफिला")

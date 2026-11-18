@@ -32,7 +32,8 @@ _SYSTEM = re.compile(
     r"left$|joined using|security code changed|message was deleted|This message was deleted|"
     r"You deleted this message|Missed (?:voice|video) call|disappearing messages", re.I)
 _MEDIA = re.compile(r"^<?(?:Media omitted|image omitted|video omitted|audio omitted|sticker omitted|"
-                    r"GIF omitted|document omitted|attached: .*)>?$", re.I)
+                    r"GIF omitted|document omitted)>?$", re.I)
+_ATTACHED = re.compile(r"^<?\s*attached:\s*(.+?)\s*>?$", re.I)
 
 # Copy-pasted chats (Instagram, SMS, many apps) put the time / date on its own line.
 _CLOCK_LINE = re.compile(r"^\[?\s*(?:(?:today|yesterday|mon|tue|wed|thu|fri|sat|sun)\w*,?\s+)?"
@@ -169,6 +170,8 @@ def parse_transcript(raw):
     if msgs is None:
         msgs = _parse_lines(raw)
         fmt = "whatsapp" if any(m["ts"] and not str(m["ts"]).startswith("clock:") for m in msgs) else "lines"
+    for m in msgs:  # "<attached: DA_Arrears.docm>" -> keep the file name: it is evidence (payload rules)
+        m["text"] = _ATTACHED.sub(r"[attachment] \1", m["text"])
     msgs = [m for m in msgs if m["text"] and not _MEDIA.match(m["text"]) and not _SYSTEM.search(m["text"])]
     order = _date_order([m["ts"] for m in msgs if isinstance(m.get("ts"), str) and re.match(r"\d", m["ts"])])
     day, last = datetime(2026, 1, 1).timestamp(), None
