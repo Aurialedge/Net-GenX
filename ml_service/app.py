@@ -242,7 +242,27 @@ def shield_conversation():
     if res.get("status") is False:
         return jsonify(res), 400
     level1 = res.pop("level1_peak")
-    return jsonify({"status": True, "counter_intel": res, "fused": _fuse(level1, res)}), 200
+    fused = _fuse(level1, res)
+    cm = res.get("conversation_model")
+    if cm:
+        # Learned 5-layer fusion decides the conversation; hard evidence in any single message
+        # and a confident campaign-graph link can still raise it, never lower it.
+        graph = next((l for l in res.get("layers", []) if l.get("layer") == 2 and l.get("status") == "ok"
+                      and l.get("confidence", 0) >= 0.5), None)
+        final = round(max(cm["score"], cm["evidence_floor"], graph["score"] if graph else 0))
+        fused["final_risk_score"] = int(final)
+        fused["threat_level"] = threat_level(final)
+        fused["escalate_cert_army"] = final >= ESCALATION_THRESHOLD
+        if final < 40:
+            fused.update(category_id=0, final_prediction=CATEGORY_NAMES[0], threat_type="Benign / Normal Operational Communication",
+                         mitigation_steps=MITIGATIONS[0])
+        fused["analysis_engine"] = f"Learned conversation model v{cm['version']} ({cm['trained_on']} conversations) + 5-Layer Counter-Intel Shield"
+        fused["details"] = (f"Conversation risk {final}/100 from the trained 5-layer fusion model "
+                            f"(LOW {cm['tier_probabilities']['LOW']:.0%} / MEDIUM {cm['tier_probabilities']['MEDIUM']:.0%} / "
+                            f"HIGH {cm['tier_probabilities']['HIGH']:.0%}). Most dangerous message: "
+                            f"{level1['final_prediction']} ({level1['final_risk_score']}). "
+                            f"Counter-Intel Shield verdict: {res['verdict']} ({res['counter_intel_score']}%).")
+    return jsonify({"status": True, "counter_intel": res, "fused": fused}), 200
 
 
 @app.route("/shield/transcript/parse", methods=["POST"])

@@ -388,3 +388,30 @@ def test_hinglish_refusal_then_probing_is_detected(client):
     r = client.post("/shield/conversation", json={"transcript": raw, "me": "Deepak"}).get_json()
     traj = next(l for l in r["counter_intel"]["layers"] if l["layer"] == 5)
     assert any("after_refusal" in s for s in traj["signals"])
+
+
+# ----------------------------------------------------------------- learned conversation model
+def _conv_cases(name):
+    import json
+    return [(d["id"], d["transcript"], d["me"], d["expect"])
+            for d in json.load(open(os.path.join(ROOT, "data", name), encoding="utf-8"))]
+
+
+def test_conversation_model_is_used_for_chat_histories(client):
+    r = client.post("/shield/conversation", json={"transcript": WA_FAMILY, "me": "Rahul"}).get_json()
+    cm = r["counter_intel"].get("conversation_model")
+    assert cm and cm["trained_on"] >= 10000 and set(cm["tier_probabilities"]) == {"LOW", "MEDIUM", "HIGH"}
+    assert "Learned conversation model" in r["fused"]["analysis_engine"]
+
+
+@pytest.mark.parametrize("cid, transcript, me, expect", _conv_cases("eval_conversations.json"))
+def test_blind_conversation_set(client, cid, transcript, me, expect):
+    s = client.post("/shield/conversation", json={"transcript": transcript, "me": me}).get_json()["fused"]["final_risk_score"]
+    got = "high" if s >= 80 else "medium" if s >= 40 else "low"
+    assert got == expect, (cid, s)
+
+
+def test_hard_evidence_in_one_message_still_escalates_a_benign_looking_chat(client):
+    chat = "Neha: Dinner ho gaya?\nKaran: Haan\nNeha: Miss you. Btw share the OTP that just came on your phone"
+    r = client.post("/shield/conversation", json={"transcript": chat, "me": "Karan"}).get_json()
+    assert r["fused"]["escalate_cert_army"]

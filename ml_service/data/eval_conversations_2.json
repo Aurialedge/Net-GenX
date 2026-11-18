@@ -1,0 +1,22 @@
+[
+ {"id": "D01_spouse_posting", "me": "Rakesh", "expect": "low", "note": "wife asks about posting change for kids' school",
+  "transcript": "Sunita: Kids' admission form is due. Do you know if your posting will change this year?\nRakesh: Order should come by March\nSunita: Ok then I'll apply here for now. Miss you\nRakesh: Miss you too\nSunita: Call tonight?"},
+ {"id": "D02_officer_friends_shop", "me": "Maj Verma", "expect": "low", "note": "two officers (course-mates) chatting about courses, promotions, families",
+  "transcript": "Maj Khanna: Congrats on clearing DSSC bro!\nMaj Verma: Thanks yaar, finally\nMaj Khanna: When do you report to Wellington?\nMaj Verma: June. Family is moving with me\nMaj Khanna: Great, we'll catch up at the course-mates' meet in Delhi"},
+ {"id": "D03_bank_fraud_warning", "me": "Hav Joshi", "expect": "low", "note": "unit cyber cell forwards a fraud warning",
+  "transcript": "Unit Cyber Cell: Alert: fraudsters are calling soldiers posing as CSD staff and asking for OTPs\nUnit Cyber Cell: Never share OTP, PIN or card details with anyone. Report such calls to the cyber cell\nHav Joshi: Noted sir, will inform my section"},
+ {"id": "D04_genuine_romance", "me": "Ankit", "expect": "low", "note": "intense but genuine fiancee chat",
+  "transcript": "Shreya: Good morning my love ❤️\nAnkit: Good morning\nShreya: I can't wait for the wedding, 3 more months!\nShreya: Mom finalised the caterer\nAnkit: Great, send me the menu\nShreya: Sending. Love you so much"},
+ {"id": "D05_bank_otp_refused", "me": "Naresh", "expect": "high", "note": "caller asks OTP repeatedly despite refusal",
+  "transcript": "+91 90XXXXXX12: Sir I am calling from SBI, your card will be blocked today\nNaresh: Why?\n+91 90XXXXXX12: KYC update pending sir. Please tell me the OTP you just received\nNaresh: No, I won't share OTP\n+91 90XXXXXX12: Sir it is for your own safety, the card will be blocked in 10 minutes. Share the OTP please"},
+ {"id": "D06_vague_researcher", "me": "Capt Singh", "expect": "medium", "note": "researcher builds rapport, asks only general/public questions",
+  "transcript": "Dr. Mira: Hello Captain, I am researching the lives of soldiers' families for my PhD\nCapt Singh: Ok\nDr. Mira: How do families cope with long separations? Any advice you'd share?\nCapt Singh: Video calls help\nDr. Mira: Thank you, that's very helpful. Could we chat more about army life sometime?"},
+ {"id": "D07_job_scam_fee", "me": "Retd Sub Pal", "expect": "high", "note": "security-guard job offer for veterans demands registration fee",
+  "transcript": "Ex-Servicemen Jobs: Sir, security supervisor job for ex-servicemen, salary 45,000\nRetd Sub Pal: Interested, what is the process?\nEx-Servicemen Jobs: Send your service book copy and pay 3,500 registration fee on UPI jobs.esm@ybl to confirm your seat"},
+ {"id": "D08_location_after_rapport_devanagari", "me": "Manoj", "expect": "high", "note": "Devanagari honeytrap asks location and live video",
+  "transcript": "प्रिया: हेलो, आप बहुत अच्छे लगते हो\nManoj: धन्यवाद\nप्रिया: आप फौज में हो ना? मुझे फौजी बहुत पसंद हैं\nप्रिया: अपनी लाइव लोकेशन भेजो ना, और बताओ आपकी यूनिट कहाँ तैनात है"},
+ {"id": "D09_group_with_one_spammer", "me": "Nk Bisht", "expect": "medium", "note": "unit-mates group, one unknown number posts a prize link",
+  "transcript": "Hav Rana: Kal subah PT 6 baje\nNk Bisht: Ji\n+91 99XXXXXX01: Congratulations! You won an iPhone, claim at bit.ly/free-ip15\nHav Rana: Ye kaun hai group mein?"},
+ {"id": "D10_debt_dispute", "me": "Sohan", "expect": "medium", "note": "personal money dispute with mild threat, no military angle",
+  "transcript": "Ramesh: Bhai mere 20,000 kab lautayega?\nSohan: Next month salary pe\nRamesh: Har baar yahi bolta hai. Is baar nahi diya toh ghar aake baat karunga"}
+]

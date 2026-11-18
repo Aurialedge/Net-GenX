@@ -297,6 +297,39 @@ class RiskEngine:
         out["severity_probabilities"] = {k: round(float(p), 4) for k, p in zip(TIERS, tier_p)}
         return out
 
+    def analyze_batch(self, texts):
+        """Vectorised Level-1 scoring for many messages (conversation analysis / training).
+
+        Same model, consistency rules and evidence floors as analyze_text, minus the optional
+        Gemini second opinion. Returns dicts: score, category_id, proba (6), tier_p (3), notes.
+        """
+        norm = [normalize((t or "")[:MAX_TEXT_CHARS]) for t in texts]
+        out = [None] * len(norm)
+        idx = [i for i, t in enumerate(norm) if t and script_supported(t)]
+        if idx:
+            with self.lock:
+                pipe, tier = self.pipeline, self.tier_pipeline
+            batch = [norm[i] for i in idx]
+            try:
+                P, T = pipe.predict_proba(batch), tier.predict_proba(batch)
+            except Exception:
+                P, T = _HeuristicModel().predict_proba(batch), _HeuristicTier().predict_proba(batch)
+            for j, i in enumerate(idx):
+                proba, tier_p = P[j], T[j]
+                score = risk_from_tier_proba(tier_p)
+                cat = int(np.argmax(proba))
+                if score >= 40 and cat == 0:
+                    cat = int(np.argmax(proba[1:]) + 1)
+                cat, score, notes = evidence_adjust_with_notes(norm[i], cat, score)
+                out[i] = {"score": float(score), "category_id": 0 if score < 40 else cat,
+                          "proba": proba, "tier_p": tier_p, "notes": notes}
+        for i, t in enumerate(norm):
+            if out[i] is None:  # empty or unsupported script: evidence rules only
+                cat, score, notes = evidence_adjust_with_notes(t, 0, 2.0 if not t else 10.0)
+                out[i] = {"score": float(score), "category_id": cat, "proba": np.full(6, 1 / 6),
+                          "tier_p": np.array([1.0, 0.0, 0.0]), "notes": notes}
+        return out
+
     def _build(self, cat, proba, score, raw, notes, engine=None, reasoning=None):
         score = int(round(max(0.0, min(100.0, score))))
         title = CATEGORY_NAMES[cat]

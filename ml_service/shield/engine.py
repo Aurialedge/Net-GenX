@@ -57,6 +57,12 @@ class CounterIntelShield:
             print(f"[SHIELD] trajectory store unavailable: {e}")
             self.tracker = None
         self._stateless_tracker = TrajectoryTracker.__new__(TrajectoryTracker)  # _score needs no store
+        try:  # learned fusion for chat histories (train_conversation.py); rules are the fallback
+            from conversation_model import ConversationModel
+            self.conv_model = ConversationModel()
+        except Exception as e:
+            print(f"[SHIELD] conversation model unavailable: {e}")
+            self.conv_model = None
 
     # ------------------------------------------------------------------
     def analyze_message(self, text, *, sender=None, recipient=None, channel=None, session_id=None,
@@ -95,42 +101,57 @@ class CounterIntelShield:
 
     def analyze_conversation(self, messages, *, channel=None, sender=None, sender_domain=None, verified_contact=False):
         """Stateless analysis of a full transcript: [{text, role: contact|user, ts?}]"""
-        turns, per_turn = [], []
-        last, peak_level1 = None, None
-        for m in messages:
-            text = str(m.get("text") or m.get("message") or "")
-            role = m.get("role", "contact")
-            if role == "user":
-                turns.append({"role": "user", "stage": 0, "risk": 0, "text": text, "ts": m.get("ts")})
-                continue
-            lvl = self.level1.analyze_text(text)
-            intent = _safe(1, "Intent & Elicitation", L1.analyze, text)
-            synth = _safe(3, "Synthetic Artifact Detection", L3.analyze_text, text)
-            stage = turn_stage(intent, {"score": lvl["final_risk_score"], "category_id": lvl.get("category_id", 0)})
-            turns.append({"role": "contact", "stage": stage, "risk": max(lvl["final_risk_score"], intent["score"]),
-                          "text": text, "ts": m.get("ts"),
-                          "syn": synth["score"] if synth["verdict"] != "INCONCLUSIVE" else None})
-            per_turn.append({"text": text[:160], "level1_risk": lvl["final_risk_score"],
-                             "level1_category": lvl["final_prediction"], "intent": intent["details"].get("primary_intent"),
-                             "stage": stage, "synthetic": synth["score"]})
-            last = (text, lvl, intent, synth)
-            if peak_level1 is None or lvl["final_risk_score"] > peak_level1["final_risk_score"]:
-                peak_level1 = lvl
-        if last is None:
+        from conversation_model import build_turns_batch, featurize
+        msgs = [{"text": str(m.get("text") or m.get("message") or ""), "role": m.get("role", "contact"), "ts": m.get("ts")}
+                for m in messages]
+        try:
+            turns_full = build_turns_batch(self.level1, [msgs])[0]
+        except Exception as e:
+            return {"status": False, "error": f"could not score conversation: {e}"}
+        contact = [t for t in turns_full if t["role"] == "contact"]
+        if not contact:
             return {"status": False, "error": "conversation contains no contact messages"}
+
+        turns, per_turn = [], []
+        for t in turns_full:
+            if t["role"] == "user":
+                turns.append({"role": "user", "stage": 0, "risk": 0, "text": t["text"], "ts": t["ts"]})
+                continue
+            synth = _safe(3, "Synthetic Artifact Detection", L3.analyze_text, t["text"])
+            risk = max(t["l1"]["score"], t["intent"]["score"])
+            turns.append({"role": "contact", "stage": t["stage"], "risk": risk, "text": t["text"], "ts": t["ts"],
+                          "syn": synth["score"] if synth["verdict"] != "INCONCLUSIVE" else None})
+            per_turn.append({"text": t["text"][:160], "level1_risk": round(t["l1"]["score"]),
+                             "level1_category": t["l1"]["category_id"], "intent": t["intent"]["details"].get("primary_intent"),
+                             "stage": t["stage"], "synthetic": synth["score"]})
+        peak = max(contact, key=lambda t: t["l1"]["score"])
+        last = contact[-1]
+        peak_level1 = self.level1.analyze_text(peak["text"])  # full report for the most dangerous message
         traj = _safe(5, "Multi-Turn Trajectory", self._stateless_tracker.analyze_transcript, turns)
-        text, lvl, intent, _ = last
+        all_contact = " ".join(t["text"] for t in contact)
         # transcript-level stylometry is far more reliable than a single message
-        all_contact = " ".join(t["text"] for t in turns if t["role"] == "contact")
         synth = _safe(3, "Synthetic Artifact Detection", L3.analyze_text, all_contact)
         graph = _safe(2, "Threat Graph Clustering", self.graph.analyze, all_contact, sender=sender, record=False,
-                      level1_score=lvl["final_risk_score"]) if self.graph else layer_result(
+                      level1_score=peak["l1"]["score"]) if self.graph else layer_result(
             2, "Threat Graph Clustering", 0, ["graph_store_unavailable"], verdict="SKIPPED", status="degraded")
         zt = _safe(4, "Zero-Trust OPSEC Perimeter", L4.analyze, all_contact, direction="inbound", sender=sender,
                    sender_domain=sender_domain, channel=channel, verified_contact=verified_contact)
-        fused = self._fuse([intent, graph, synth, zt, traj], peak_level1, "inbound")
+        fused = self._fuse([last["intent"], graph, synth, zt, traj], peak_level1, "inbound")
         fused["level1_peak"] = peak_level1
         fused["turns"] = per_turn
+
+        if self.conv_model is not None and self.conv_model.ready:
+            try:
+                score, tier_p = self.conv_model.predict(featurize(turns_full, zt["score"], synth["score"]))
+                fused["conversation_model"] = {
+                    "score": round(score, 1),
+                    "tier_probabilities": {k: round(float(v), 4) for k, v in zip(("LOW", "MEDIUM", "HIGH"), tier_p)},
+                    "evidence_floor": max([0.0] + [t["l1"]["score"] for t in contact if t["l1"]["notes"]]),
+                    "version": self.conv_model.info.get("version"),
+                    "trained_on": self.conv_model.info.get("n_train"),
+                }
+            except Exception as e:
+                print(f"[SHIELD] conversation model failed: {e}; using rule-based fusion")
         return fused
 
     def analyze_media(self, filename, content, mime_type=""):
