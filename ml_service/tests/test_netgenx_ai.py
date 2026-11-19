@@ -454,3 +454,55 @@ def test_conversation_sets_2_and_3(client, cid, transcript, me, expect):
     s = client.post("/shield/conversation", json={"transcript": transcript, "me": me}).get_json()["fused"]["final_risk_score"]
     got = "high" if s >= 80 else "medium" if s >= 40 else "low"
     assert got == expect, (cid, s)
+
+
+# ----------------------------------------------------------------- RAG (ConvoSentinel-style retrieval)
+HONEYTRAP_CHAT = ("Riya: Hi, I think we met at the Pune fest\nArjun: Maybe\nRiya: You look so smart in uniform, which unit are you in?\n"
+                  "Arjun: Sorry I can't share that\nRiya: Come on yaar, just tell me where you are posted and when your unit moves next")
+
+
+def test_rag_returns_retrieved_cases_for_flagged_messages(client):
+    ci = client.post("/shield/conversation", json={"transcript": HONEYTRAP_CHAT, "me": "Arjun"}).get_json()["counter_intel"]
+    ev = ci["rag"]
+    assert ev["n_flagged"] >= 1 and ev["flagged_messages"]
+    top = ev["flagged_messages"][0]
+    assert top["p_si_request"] > 0.5 and top["similar_messages"]
+    assert all(c["similarity"] >= 0.35 for c in top["similar_messages"])
+    assert set(ev["conversation_vote"]) == {"LOW", "MEDIUM", "HIGH"}
+
+
+def test_rag_features_feed_only_the_escalation_head():
+    from conversation_model import FEATURE_NAMES, GE1_COLS
+    from rag import RAG_FEATURES
+    assert set(RAG_FEATURES) <= set(FEATURE_NAMES)
+    assert not {FEATURE_NAMES[i] for i in GE1_COLS} & set(RAG_FEATURES)
+
+
+def test_rag_training_caps_hide_verbatim_twins():
+    import numpy as np
+    import rag
+    from conversation_model import ConversationModel
+    kb = ConversationModel().kb
+    q = kb.embed(["Which unit are you in and where are you posted?"])
+    capped, _ = kb.search("msg", q, cap=np.array([0.6], dtype=np.float32))
+    assert capped.max() <= 0.6 + 1e-6
+    caps = rag.training_caps(1000, np.random.default_rng(0))
+    assert 0.5 <= np.median(caps) <= 0.95
+
+
+def test_rag_stats_and_case_memory(client):
+    before = client.get("/rag/stats").get_json()
+    assert before["status"] and before["conversations"] > 1000
+    bad = client.post("/rag/cases", json={"messages": [{"text": "hi", "role": "contact"}], "tier": "SEVERE", "category": 1})
+    assert bad.status_code == 400
+    r = client.post("/rag/cases", json={"transcript": HONEYTRAP_CHAT, "me": "Arjun", "tier": "HIGH", "category": 1})
+    assert r.status_code == 201 and r.get_json()["runtime_cases"] == before["runtime_cases"] + 1
+    ci = client.post("/shield/conversation", json={"transcript": HONEYTRAP_CHAT, "me": "Arjun"}).get_json()["counter_intel"]
+    assert any(c["source"].startswith("analyst:") for c in ci["rag"]["similar_conversations"])
+
+
+def test_rag_cases_require_admin(client, monkeypatch):
+    import app as app_module
+    monkeypatch.setattr(app_module, "ADMIN_TOKEN", "secret")
+    r = client.post("/rag/cases", json={"transcript": HONEYTRAP_CHAT, "me": "Arjun", "tier": "HIGH", "category": 1})
+    assert r.status_code == 403

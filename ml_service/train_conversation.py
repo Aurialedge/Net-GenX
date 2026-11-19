@@ -6,6 +6,10 @@ Train the conversation-risk model (learned 5-layer fusion for chat histories).
     python train_conversation.py --no-save
 
 Data: conversation_data.generate_conversations (synthetic, labelled LOW/MEDIUM/HIGH).
+RAG: the knowledge base (rag.build_default) is built first from its own corpus seed (rag.KB_SEED,
+never a training seed) and saved to models/rag_kb.joblib; every training row gets RAG features
+retrieved under a random similarity cap (rag.training_caps) so the classifier sees the
+retrieval quality of real chats, not the verbatim twins a synthetic corpus always has.
 Evaluation: an 80/20 stratified split of the synthetic data (optimistic - same generator),
 then the numbers that matter: data/eval_conversations.json (hand-written, never generated or
 trained on) and ../test_chats (repo sample exports), both run through the full live pipeline
@@ -27,13 +31,14 @@ from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 os.environ.setdefault("NETGENX_ENABLE_GEMINI", "0")
 from model import detector                                     # noqa: E402  Level-1 risk model
 from conversation_data import generate_conversations          # noqa: E402
+import rag                                                    # noqa: E402
 from conversation_model import (build_turns_batch, conversation_context, featurize,  # noqa: E402
-                                FEATURE_NAMES, MODEL_PATH, TIER_SCORE, OrdinalMonotoneClassifier,
+                                FEATURE_NAMES, GE1_COLS, MODEL_PATH, TIER_SCORE, OrdinalMonotoneClassifier,
                                 BaggedConversationModel)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 METRICS_PATH = os.path.join(HERE, "models", "conversation_metrics.json")
-VERSION = "4.0.0"
+VERSION = "5.0.0"
 BAG_SEEDS = (7, 17, 27, 37, 47, 57, 67)
 TIERS = ("low", "medium", "high")
 
@@ -70,16 +75,19 @@ def noisy_turns(turns, g):
     return out
 
 
-def build_matrix(convs, noisy_copies=1, seed=11):
+def build_matrix(convs, kb, noisy_copies=1, seed=11):
     t0 = time.time()
     turn_lists = build_turns_batch(detector, [to_roles(c) for c in convs])
     print(f"[CONV] layer signals for {len(convs)} conversations in {time.time() - t0:.0f}s")
     g = np.random.default_rng(seed)
+    # one independent similarity cap per copy, so the clean and noisy rows see different retrieval quality
+    rag_rows = [kb.analyze_batch(turn_lists, caps=rag.training_caps(len(turn_lists), g)) for _ in range(1 + noisy_copies)]
+    print(f"[CONV] RAG retrieval for {len(convs)} conversations x {1 + noisy_copies} in {time.time() - t0:.0f}s")
     X, keep, group = [], [], []
     for i, turns in enumerate(turn_lists):
         zt, syn = conversation_context(turns)
         for k in range(1 + noisy_copies):
-            f = featurize(turns if k == 0 else noisy_turns(turns, g), zt, syn)
+            f = featurize(turns if k == 0 else noisy_turns(turns, g), zt, syn, rag_rows[k][i]["features"])
             if f is not None:
                 X.append(f)
                 keep.append(i)
@@ -107,9 +115,13 @@ def main():
     args = ap.parse_args()
 
     t0 = time.time()
+    kb = rag.build_default()
+    if not args.no_save:
+        kb.save()
+        print(f"[RAG] saved {rag.KB_PATH} ({os.path.getsize(rag.KB_PATH) / 1e6:.1f} MB)")
     convs = generate_conversations(n=args.n)
     print(f"[CONV] generated {len(convs)} conversations, {sum(len(c['messages']) for c in convs)} messages")
-    X, keep, group = build_matrix(convs)
+    X, keep, group = build_matrix(convs, kb)
     y = np.array([convs[i]["tier"] for i in keep])
     scen = np.array([convs[i]["scenario"] for i in keep])
 
@@ -140,7 +152,7 @@ def main():
     members, n_msgs = [make_model().fit(X, y)], sum(len(c["messages"]) for c in convs)
     for k, seed in enumerate(BAG_SEEDS[1:args.bag], start=2):
         cs = generate_conversations(n=args.n, seed=seed)
-        Xk, keep_k, _ = build_matrix(cs, seed=seed + 1)
+        Xk, keep_k, _ = build_matrix(cs, kb, seed=seed + 1)
         members.append(make_model().fit(Xk, np.array([cs[i]["tier"] for i in keep_k])))
         n_msgs += sum(len(c["messages"]) for c in cs)
         print(f"[CONV] bag member {k}/{args.bag} trained (corpus seed {seed})")
@@ -150,7 +162,10 @@ def main():
                "n_feature_rows": int(len(y)) * len(members), "n_messages": int(n_msgs),
                "noise_augmentation": "1 noisy copy per conversation: score jitter sd 6, 8% messages randomised",
                "tier_counts": {TIERS[k]: int((y == k).sum()) for k in range(3)},
-               "algorithm": f"bagged ordinal monotone-constrained HistGradientBoosting (P>=MEDIUM, P(HIGH)) on {len(FEATURE_NAMES)} features from the Level-1 model and shield layers 1/3/4/5",
+               "algorithm": f"ConvoSentinel-style RAG (message / context-snippet / conversation k-NN over a labelled knowledge base) "
+                            f"+ bagged ordinal monotone-constrained HistGradientBoosting: P(>=MEDIUM) on the {len(GE1_COLS)} Level-1 / shield "
+                            f"layer 1/3/4/5 features, P(HIGH) on those plus the {len(rag.RAG_FEATURES)} RAG features",
+               "rag_knowledge_base": {**kb.stats(), "corpus_seed": rag.KB_SEED, "corpus_size": rag.KB_SIZE},
                "features": FEATURE_NAMES, "synthetic_holdout": split, "training_seconds": round(time.time() - t0, 1)}
     if not args.no_save:
         os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)

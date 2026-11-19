@@ -13,6 +13,8 @@ if *every* layer fails we return a cautious MEDIUM rather than CLEAR).
 """
 import traceback
 
+import numpy as np
+
 from . import intent as L1
 from . import synthetic as L3
 from . import zero_trust as L4
@@ -43,13 +45,20 @@ def _safe(layer_no, name, fn, *a, **kw):
                             verdict="DEGRADED", confidence=0.0, status="degraded")
 
 
-def _conversation_category(contact):
-    """Threat type of the whole chat: category probabilities weighted by each message's risk."""
-    import numpy as np
+RAG_CATEGORY_WEIGHT = 0.5  # chosen on the dev half of data/eval_conversations_100.json
+
+
+def _conversation_category(contact, rag_vote=None):
+    """Threat type of the whole chat: category probabilities weighted by each message's risk,
+    blended with the threat types of the most similar known conversations (RAG)."""
     w = np.zeros(6)
     for t in contact:
         w += (t["l1"]["score"] / 100.0) ** 2 * np.asarray(t["l1"]["proba"])
-    return int(np.argmax(w[1:]) + 1)
+    w = w[1:] / max(1e-9, w[1:].sum())
+    if rag_vote is not None:
+        v = np.asarray(rag_vote, dtype=float)[1:]
+        w = w + RAG_CATEGORY_WEIGHT * v / max(1e-9, v.sum())
+    return int(np.argmax(w) + 1)
 
 
 def _evidence_category(contact, conv_rules):
@@ -83,6 +92,26 @@ class CounterIntelShield:
         except Exception as e:
             print(f"[SHIELD] conversation model unavailable: {e}")
             self.conv_model = None
+        self.case_store = None
+        if self.conv_model is not None and self.conv_model.kb is not None:  # replay analyst-confirmed RAG cases
+            from rag import CaseStore
+            from .common import STATE_DIR
+            self.case_store = CaseStore(STATE_DIR)
+            for case in self.case_store.load():
+                try:
+                    self.conv_model.kb.add_case(case["turns"], case["tier"], case["category"], case.get("source", "analyst"))
+                except Exception as e:
+                    print(f"[SHIELD] skipped stored RAG case: {e}")
+
+    def add_rag_case(self, messages, tier, category, source="analyst"):
+        """Add an analyst-confirmed conversation to the RAG knowledge base and persist it."""
+        if self.case_store is None:
+            raise RuntimeError("RAG knowledge base unavailable")
+        turns = [{"role": "user" if m.get("role") == "user" else "contact", "text": str(m.get("text") or "")}
+                 for m in messages if str(m.get("text") or "").strip()]
+        n = self.conv_model.kb.add_case(turns, tier, category, source)
+        self.case_store.append({"turns": turns, "tier": tier, "category": category, "source": source})
+        return n
 
     # ------------------------------------------------------------------
     def analyze_message(self, text, *, sender=None, recipient=None, channel=None, session_id=None,
@@ -164,7 +193,10 @@ class CounterIntelShield:
         if self.conv_model is not None and self.conv_model.ready:
             conv_rules = conversation_evidence([t["text"] for t in contact]) + trajectory_evidence(turns_full)
             try:
-                score, tier_p = self.conv_model.predict(featurize(turns_full, zt["score"], synth["score"]))
+                # ConvoSentinel stages 1-2: flag SI requests, retrieve similar known cases for each
+                retrieved = self.conv_model.kb.analyze_batch([turns_full], explain=True)[0]
+                fused["rag"] = retrieved.get("evidence")
+                score, tier_p = self.conv_model.predict(featurize(turns_full, zt["score"], synth["score"], retrieved["features"]))
                 fused["conversation_model"] = {
                     "score": round(score, 1),
                     "tier_probabilities": {k: round(float(v), 4) for k, v in zip(("LOW", "MEDIUM", "HIGH"), tier_p)},
@@ -172,7 +204,7 @@ class CounterIntelShield:
                                           + [floor for _, floor, _ in conv_rules]),
                     "evidence_notes": sorted({n for t in contact for n in t["l1"]["notes"]} | {note for _, _, note in conv_rules}),
                     "evidence_category": _evidence_category(contact, conv_rules),
-                    "conversation_category": _conversation_category(contact),
+                    "conversation_category": _conversation_category(contact, retrieved["category_vote"]),
                     "version": self.conv_model.info.get("version"),
                     "trained_on": self.conv_model.info.get("n_train"),
                 }

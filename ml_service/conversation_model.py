@@ -8,6 +8,9 @@ Each conversation is turned into a fixed feature vector built from the layer out
   * Layer 5 (trajectory) inputs: grooming stage per message, progression, refusals by the
     reporter and probing after them, drift towards military topics;
   * Layer 3 (synthetic style) and Layer 4 (zero-trust) on the contact's combined text.
+  * RAG (rag.py, ConvoSentinel-style): flagged messages, their context snippets and the whole
+    conversation are matched against a labelled knowledge base of known cases; the similarity-
+    weighted votes are appended as RAG_FEATURES.
 A gradient-boosted classifier (train_conversation.py, 10,000 synthetic conversations) maps that
 vector to LOW / MEDIUM / HIGH; the conversation risk score is the expected severity.
 
@@ -20,6 +23,7 @@ import statistics
 import numpy as np
 
 from preprocessor import MONEY_RE, URL_RE
+from rag import RAG_FEATURES
 from risk_rules import conversation_evidence
 from shield import intent as L1
 from shield import synthetic as L3
@@ -40,6 +44,7 @@ FEATURE_NAMES = (
     + ["ev_secret_ask", "ev_payload", "ev_cred_lure", "ev_extortion", "ev_fee_scam", "ev_conv_extortion"]
     + ["refusals", "probe_after_refusal", "probe_after_refusal_flag", "opsec_frac", "opsec_drift"]
     + ["zt_score", "syn_score", "money_flag", "url_flag"]
+    + RAG_FEATURES
 )
 
 
@@ -82,7 +87,7 @@ def conversation_context(turns):
     return zt, syn
 
 
-def featurize(turns, zt_score, syn_score):
+def featurize(turns, zt_score, syn_score, rag_features):
     c = [t for t in turns if t["role"] == "contact"]
     if not c:
         return None
@@ -134,6 +139,7 @@ def featurize(turns, zt_score, syn_score):
     f += [zt_score / 100, syn_score / 100,
           float(bool(MONEY_RE.search(joined) or "@ybl" in joined or "@ok" in joined or "@paytm" in joined)),
           float(bool(URL_RE.search(joined)))]
+    f += list(rag_features)
     return np.array(f, dtype=float)
 
 
@@ -144,19 +150,28 @@ MONOTONE_UP = {"r_max", "r_top2", "r_frac40", "r_frac80", "r_n80", "r_late_max",
                "cat_max_4", "cat_max_5", "tier_mean_high", "tier_max_high", "stage_max", "intent_max", "info_req_frac",
                "secrecy_n", "ev_secret_ask", "ev_payload", "ev_cred_lure", "ev_extortion", "ev_fee_scam", "ev_conv_extortion",
                "probe_after_refusal",
-               "probe_after_refusal_flag", "zt_score"}
-MONOTONE_DOWN = {"tier_mean_low", "cat_mean_0"}
+               "probe_after_refusal_flag", "zt_score",
+               "rag_msg_mal_max", "rag_msg_mal_n", "rag_flag_mal_max", "rag_ctx_high_max", "rag_conv_high"}
+MONOTONE_DOWN = {"tier_mean_low", "cat_mean_0", "rag_conv_low"}
 
 
 def monotone_constraints():
     return [1 if n in MONOTONE_UP else -1 if n in MONOTONE_DOWN else 0 for n in FEATURE_NAMES]
 
 
+# The RAG features feed only the P(HIGH) head. On hand-written dev chats they separate HIGH from
+# the rest as well as on synthetic data (message SI-request probability ~0.78 vs ~0.25), but they
+# do not separate LOW from MEDIUM at all: real benign chats about leave / postings / OTPs sit
+# close to known threat snippets. Letting the P(>=MEDIUM) head use them pushed benign family
+# chats to MEDIUM on held-out data.
+GE1_COLS = [i for i, n in enumerate(FEATURE_NAMES) if n not in RAG_FEATURES]
+
+
 class OrdinalMonotoneClassifier:
     """LOW < MEDIUM < HIGH as two monotone-constrained binary boosters: P(>=MEDIUM), P(HIGH).
 
     (sklearn only supports monotonic constraints for binary targets, and the ordinal split
-    also respects that HIGH implies at least MEDIUM.)
+    also respects that HIGH implies at least MEDIUM.) P(>=MEDIUM) uses GE1_COLS; P(HIGH) uses all.
     """
 
     def __init__(self, **params):
@@ -165,12 +180,14 @@ class OrdinalMonotoneClassifier:
     def fit(self, X, y):
         from sklearn.ensemble import HistGradientBoostingClassifier
         cst = monotone_constraints()
-        self.ge1 = HistGradientBoostingClassifier(monotonic_cst=cst, **self.params).fit(X, (y >= 1).astype(int))
+        self.cols1 = list(GE1_COLS)
+        self.ge1 = HistGradientBoostingClassifier(monotonic_cst=[cst[i] for i in self.cols1], **self.params).fit(
+            X[:, self.cols1], (y >= 1).astype(int))
         self.ge2 = HistGradientBoostingClassifier(monotonic_cst=cst, **self.params).fit(X, (y >= 2).astype(int))
         return self
 
     def predict_proba(self, X):
-        p1 = self.ge1.predict_proba(X)[:, 1]
+        p1 = self.ge1.predict_proba(X[:, self.cols1])[:, 1]
         p2 = np.minimum(self.ge2.predict_proba(X)[:, 1], p1)
         return np.column_stack([1 - p1, p1 - p2, p2])
 
@@ -196,7 +213,13 @@ class BaggedConversationModel:
 
 class ConversationModel:
     def __init__(self, path=MODEL_PATH):
-        self.clf, self.info = None, {}
+        self.clf, self.info, self.kb = None, {}, None
+        try:
+            from rag import KnowledgeBase
+            self.kb = KnowledgeBase.load()
+        except Exception as e:
+            print(f"[AI-ENGINE] RAG knowledge base unavailable ({e}); chat histories use rule-based fusion")
+            return
         try:
             import joblib
             import sklearn
@@ -204,7 +227,8 @@ class ConversationModel:
             if b.get("sklearn_version") != sklearn.__version__ or list(b.get("features", [])) != FEATURE_NAMES:
                 raise RuntimeError("conversation model incompatible with this runtime; retrain with train_conversation.py")
             self.clf, self.info = b["model"], {k: v for k, v in b.items() if k not in ("model",)}
-            print(f"[AI-ENGINE] conversation model ready v{b.get('version')} ({b.get('n_train')} training conversations)")
+            print(f"[AI-ENGINE] conversation model ready v{b.get('version')} ({b.get('n_train')} training conversations, "
+                  f"RAG knowledge base {self.kb.stats()['messages']} messages / {self.kb.stats()['conversations']} conversations)")
         except FileNotFoundError:
             print("[AI-ENGINE] no conversation model found; chat histories use rule-based fusion")
         except Exception as e:
@@ -212,7 +236,7 @@ class ConversationModel:
 
     @property
     def ready(self):
-        return self.clf is not None
+        return self.clf is not None and self.kb is not None
 
     def predict(self, features):
         p = self.clf.predict_proba(features.reshape(1, -1))[0]

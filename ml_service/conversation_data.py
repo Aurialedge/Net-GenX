@@ -330,7 +330,7 @@ def _render(rng, scenario):
         else:
             text = _pick(rng, REPLY.get(kind) or P.get(kind) or T[kind])
             sender = me
-        msgs.append({"sender": sender, "text": _perturb(text, rng), "ts": ts})
+        msgs.append({"sender": sender, "text": _perturb(text, rng), "ts": ts, "kind": kind})  # kind: message-level label (rag.py)
     if scenario in ("unit_group", "group_with_spam"):  # group chats: several senders
         for m in msgs:
             if m["sender"] == contact and rng.random() < 0.5:

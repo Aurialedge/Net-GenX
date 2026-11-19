@@ -10,6 +10,7 @@ import { Separator } from '@/components/ui/separator'
 import { Spinner } from '@/components/ui/spinner'
 import { BAND_OUTCOME, CATEGORY_HINTS, CATEGORY_LABELS, riskBand } from '@/lib/risk'
 import { ConversationTimeline } from './conversation-timeline'
+import { SimilarCases } from './similar-cases'
 import { CounterIntelPanel } from './counter-intel-panel'
 
 // Where the shown steps came from (same states as the original page).
@@ -216,6 +217,8 @@ export function ResultCard({ report, mitigationSource, escalation, countdown, on
         )}
 
         {report.counter_intel?.turns?.length > 0 && <ConversationTimeline report={report} />}
+
+        {report.counter_intel?.rag && <SimilarCases report={report} />}
 
         <Separator />
         <section aria-labelledby="evidence-heading" className="space-y-2">
