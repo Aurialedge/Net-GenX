@@ -74,6 +74,27 @@ Or start individual services:
 
 ---
 
+## 🧠 Phase 2: Chat-History Analysis (RAG + HistGradientBoosting)
+
+Chat histories follow a ConvoSentinel-style three-stage pipeline (`ml_service/rag.py`). Retrieval adds context, and a gradient-boosted model makes the risk decision.
+
+1. **Message-level detector.** The Level-1 risk model and the intent layer flag each message from the other person that looks like a request for sensitive information (SI).
+2. **RAG module.** Each message, its context snippet (with the two previous turns) and the whole conversation are matched against a labelled knowledge base of known cases. Matching uses TF-IDF and 128-d LSA embeddings with cosine k-NN. The knowledge base is an independent, message-labelled synthetic corpus plus the curated threat dataset. Votes are weighted by similarity and shrunk towards the prior when nothing similar exists.
+3. **Conversation-level decision.** A bagged, monotone-constrained, ordinal `HistGradientBoostingClassifier` decides LOW / MEDIUM / HIGH. P(≥MEDIUM) uses the 54 Level-1 and shield features. P(HIGH), the CERT-Army escalation decision, also uses the 10 RAG features. The retrieved cases are returned as the explanation (`counter_intel.rag`) and shown as "Similar Known Cases".
+
+Retraining: `cd ml_service && python train_conversation.py`. This builds `models/rag_kb.joblib` and `models/conversation_model.joblib`. Training rows get RAG features under a random similarity cap, so the model learns the retrieval quality of real chats rather than the verbatim twins in a synthetic corpus.
+
+Analysts can add confirmed cases to the RAG memory without retraining: `POST /rag/cases` (localhost or `X-Admin-Token`) with `{transcript, me, tier, category}`. `GET /rag/stats` reports the knowledge-base size.
+
+| 160 hand-written conversations (never trained on) | before RAG | with RAG |
+|---|---|---|
+| Band accuracy (LOW / MEDIUM / HIGH) | 131 / 160 | 135 / 160 |
+| Escalation decision correct | 144 / 160 | 147 / 160 |
+| False escalations | 11 | 7 |
+| Missed escalations | 5 | 6 |
+
+---
+
 ## 🧪 Automated Integration Tests
 
 Run the full end-to-end integration test suite verifying all 12 system pipelines:

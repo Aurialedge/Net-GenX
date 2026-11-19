@@ -8,6 +8,8 @@ Endpoints
   POST /shield/conversation    stateless analysis of a whole transcript
   POST /shield/outbound        zero-trust DLP check of a reply before it is sent
   GET  /shield/clusters        threat-graph campaign clusters
+  GET  /rag/stats              RAG knowledge-base size (ConvoSentinel-style retrieval for chats)
+  POST /rag/cases              add an analyst-confirmed conversation to the RAG memory - localhost or ADMIN_TOKEN
   DELETE /shield/session/<id>  forget a conversation's trajectory
   GET  /model/metrics          training / held-out evaluation report
   POST /model/reload           reload (or self-heal retrain) the model - localhost or ADMIN_TOKEN
@@ -163,6 +165,7 @@ def health():
         "counter_intel_shield": "online" if shield else "offline",
         "shield_graph": bool(shield and shield.graph),
         "shield_trajectory": bool(shield and shield.tracker),
+        "rag_knowledge_base": _rag_kb().stats() if _rag_kb() is not None else None,
         "escalation_threshold": ESCALATION_THRESHOLD,
         "version": "3.0.0",
         "uptime_s": int(time.time() - STARTED),
@@ -262,6 +265,7 @@ def _conversation_report(data):
     level1 = res.pop("level1_peak")
     fused = _fuse(level1, res)
     cm = res.get("conversation_model")
+    rag_ev = res.get("rag")
     if cm:
         # Learned 5-layer fusion decides the conversation; hard evidence in any single message
         # and a confident campaign-graph link can still raise it, never lower it.
@@ -279,10 +283,16 @@ def _conversation_report(data):
         if final < 40:
             fused.update(category_id=0, final_prediction=CATEGORY_NAMES[0], threat_type="Benign / Normal Operational Communication",
                          mitigation_steps=MITIGATIONS[0])
-        fused["analysis_engine"] = f"Learned conversation model v{cm['version']} ({cm['trained_on']} conversations) + 5-Layer Counter-Intel Shield"
+        fused["analysis_engine"] = (f"Learned conversation model v{cm['version']} ({cm['trained_on']} conversations) "
+                                    f"+ RAG case retrieval + 5-Layer Counter-Intel Shield")
         fused["details"] = (f"Conversation risk {final}/100 from the trained 5-layer fusion model "
                             f"(LOW {cm['tier_probabilities']['LOW']:.0%} / MEDIUM {cm['tier_probabilities']['MEDIUM']:.0%} / "
-                            f"HIGH {cm['tier_probabilities']['HIGH']:.0%}). Most dangerous message: "
+                            f"HIGH {cm['tier_probabilities']['HIGH']:.0%}). "
+                            + (f"RAG: {rag_ev['n_flagged']} of {rag_ev['n_contact_messages']} messages flagged as possible "
+                               f"information requests; closest known cases vote LOW {rag_ev['conversation_vote']['LOW']:.0%} / "
+                               f"MEDIUM {rag_ev['conversation_vote']['MEDIUM']:.0%} / HIGH {rag_ev['conversation_vote']['HIGH']:.0%}. "
+                               if rag_ev else "")
+                            + f"Most dangerous message: "
                             f"{level1['final_prediction']} ({level1['final_risk_score']}). "
                             f"Counter-Intel Shield verdict: {res['verdict']} ({res['counter_intel_score']}%).")
     return {"status": True, "counter_intel": res, "fused": fused}, 200
@@ -359,11 +369,56 @@ def model_metrics():
         (jsonify({"status": False, "error": "no metrics report; run python train.py"}), 404)
 
 
-@app.route("/model/reload", methods=["POST"])
-def model_reload():
+def _is_admin():
     token = request.headers.get("X-Admin-Token")
     local = request.remote_addr in ("127.0.0.1", "::1")
-    if not ((ADMIN_TOKEN and token == ADMIN_TOKEN) or (not ADMIN_TOKEN and local)):
+    return (ADMIN_TOKEN and token == ADMIN_TOKEN) or (not ADMIN_TOKEN and local)
+
+
+def _rag_kb():
+    cm = shield.conv_model if shield else None
+    return cm.kb if cm is not None else None
+
+
+@app.route("/rag/stats", methods=["GET"])
+def rag_stats():
+    kb = _rag_kb()
+    if kb is None:
+        return jsonify({"status": False, "error": "RAG knowledge base unavailable"}), 503
+    return jsonify({"status": True, **kb.stats()}), 200
+
+
+@app.route("/rag/cases", methods=["POST"])
+def rag_add_case():
+    """Body: {transcript + me | messages:[{text, role}], tier: LOW|MEDIUM|HIGH, category: 0-5, source?}."""
+    if not _is_admin():
+        return jsonify({"status": False, "error": "forbidden"}), 403
+    if _rag_kb() is None:
+        return jsonify({"status": False, "error": "RAG knowledge base unavailable"}), 503
+    data = request.get_json(silent=True) or {}
+    tier = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}.get(str(data.get("tier", "")).upper())
+    try:
+        category = int(data.get("category"))
+    except (TypeError, ValueError):
+        category = -1
+    if tier is None or not 0 <= category < len(CATEGORY_NAMES):
+        return jsonify({"status": False, "error": "'tier' must be LOW|MEDIUM|HIGH and 'category' 0-5"}), 400
+    msgs = data.get("messages")
+    if not msgs and isinstance(data.get("transcript"), str):
+        msgs = to_conversation(parse_transcript(data["transcript"])["messages"], data.get("me"))
+    if not isinstance(msgs, list) or not msgs or len(msgs) > 200:
+        return jsonify({"status": False, "error": "'messages' (1-200) or 'transcript' required"}), 400
+    msgs = [m if isinstance(m, dict) else {"text": str(m)} for m in msgs]
+    try:
+        n = shield.add_rag_case(msgs, tier, category, source=f"analyst:{str(data.get('source') or 'case')[:64]}")
+    except ValueError as e:
+        return jsonify({"status": False, "error": str(e)}), 400
+    return jsonify({"status": True, "indexed_messages": n, **_rag_kb().stats()}), 201
+
+
+@app.route("/model/reload", methods=["POST"])
+def model_reload():
+    if not _is_admin():
         return jsonify({"status": False, "error": "forbidden"}), 403
     ok = detector.load()
     return jsonify({"status": ok, "engine": detector.engine_name, "version": detector.model_info.get("version")}), 200
